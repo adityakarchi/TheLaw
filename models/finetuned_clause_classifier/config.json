@@ -1,0 +1,47 @@
+{
+  "architectures": [
+    "BertForSequenceClassification"
+  ],
+  "attention_probs_dropout_prob": 0.1,
+  "classifier_dropout": null,
+  "dtype": "float32",
+  "eos_token_ids": 0,
+  "hidden_act": "gelu",
+  "hidden_dropout_prob": 0.1,
+  "hidden_size": 768,
+  "id2label": {
+    "0": "Agreement Date",
+    "1": "Anti-Assignment",
+    "2": "Audit Rights",
+    "3": "Cap On Liability",
+    "4": "Document Name",
+    "5": "Insurance",
+    "6": "License Grant",
+    "7": "Parties"
+  },
+  "initializer_range": 0.02,
+  "intermediate_size": 3072,
+  "label2id": {
+    "Agreement Date": 0,
+    "Anti-Assignment": 1,
+    "Audit Rights": 2,
+    "Cap On Liability": 3,
+    "Document Name": 4,
+    "Insurance": 5,
+    "License Grant": 6,
+    "Parties": 7
+  },
+  "layer_norm_eps": 1e-12,
+  "max_position_embeddings": 512,
+  "model_type": "bert",
+  "num_attention_heads": 12,
+  "num_hidden_layers": 12,
+  "output_past": true,
+  "pad_token_id": 0,
+  "position_embedding_type": "absolute",
+  "problem_type": "single_label_classification",
+  "transformers_version": "4.57.3",
+  "type_vocab_size": 2,
+  "use_cache": true,
+  "vocab_size": 30522
+}

@@ -1,0 +1,6 @@
+streamlit
+pandas
+groq
+scikit-learn
+nltk
+pypdf

@@ -11,6 +11,11 @@ ENV/
 dist/
 build/
 
+# Environment variables
+.env
+*.env
+!.env.example
+
 # Model files - too large for GitHub
 models/finetuned_clause_classifier/checkpoint-*/
 models/finetuned_clause_classifier/*.safetensors

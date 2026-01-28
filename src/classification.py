@@ -1,3 +1,5 @@
+"""Clause classification using fine-tuned Legal-BERT."""
+
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
@@ -8,6 +10,7 @@ model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
 model.eval()
 
 def classify_clause(text: str) -> str:
+    """Classify legal clause type using Legal-BERT."""
     inputs = tokenizer(
         text,
         return_tensors="pt",

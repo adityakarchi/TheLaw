@@ -1,3 +1,5 @@
+"""Full pipeline with clause segmentation and risk analysis."""
+
 import re
 import pickle
 import pandas as pd
@@ -7,7 +9,6 @@ from src.preprocessing import read_pdf
 from .simplification import simplify_clause
 from .classification import classify_clause
 
-# Get the base directory (legal/)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Load models once

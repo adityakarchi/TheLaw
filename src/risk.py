@@ -1,3 +1,5 @@
+"""Risk scoring based on keyword matching."""
+
 RISK_KEYWORDS = {
     "high": [
         "penalty", "terminate immediately",

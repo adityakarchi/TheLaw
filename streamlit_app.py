@@ -26,10 +26,10 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-/* Modern Professional Theme */
+/* Dark Professional Theme */
 .stApp {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    min-height: 100vh;
+    background-color: #0e1117;
+    color: #FAFAFA;
 }
 
 /* Main container styling */
@@ -40,32 +40,34 @@ st.markdown("""
 
 /* Card styling */
 .card {
-    background: white;
+    background: #1E1E1E;
     border-radius: 16px;
     padding: 2rem;
     margin-bottom: 1.5rem;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    border: 1px solid #333;
 }
 
 /* Header styling */
 .main-header {
-    background: white;
+    background: #1E1E1E;
     border-radius: 16px;
     padding: 2rem 2.5rem;
     margin-bottom: 2rem;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
     border-left: 5px solid #667eea;
+    border: 1px solid #333;
 }
 
 .main-header h1 {
-    color: #1a1a2e;
+    color: #FAFAFA;
     font-size: 2.5rem;
     margin: 0;
     font-weight: 700;
 }
 
 .main-header p {
-    color: #4a5568;
+    color: #A0A0A0;
     margin-top: 0.5rem;
     font-size: 1.1rem;
 }
@@ -91,7 +93,7 @@ st.markdown("""
 /* Status badges */
 .status-legal {
     background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-    color: white;
+    color: black;
     padding: 8px 20px;
     border-radius: 25px;
     font-weight: 600;
@@ -130,8 +132,10 @@ st.markdown("""
 /* Text areas */
 .stTextArea textarea {
     border-radius: 12px;
-    border: 2px solid #e0e0e0;
+    border: 2px solid #333;
     font-size: 1rem;
+    background-color: #262730;
+    color: #FAFAFA;
     transition: border-color 0.3s ease;
 }
 
@@ -145,24 +149,26 @@ st.markdown("""
     border: 2px dashed #667eea;
     border-radius: 12px;
     padding: 2rem;
-    background: rgba(102, 126, 234, 0.05);
+    background: rgba(102, 126, 234, 0.1);
 }
 
 /* Result boxes */
 .result-box {
-    background: #f8fafc;
+    background: #1E1E1E;
     border-radius: 12px;
     padding: 1.5rem;
     border-left: 4px solid #667eea;
     margin: 1rem 0;
+    color: #e0e0e0;
 }
 
 .simplified-box {
-    background: linear-gradient(135deg, rgba(17, 153, 142, 0.1) 0%, rgba(56, 239, 125, 0.1) 100%);
+    background: rgba(17, 153, 142, 0.2);
     border-radius: 12px;
     padding: 1.5rem;
     border-left: 4px solid #11998e;
     margin: 1rem 0;
+    color: #e0e0e0;
 }
 
 /* Terms pill */
@@ -178,16 +184,17 @@ st.markdown("""
 
 /* Metric styling */
 [data-testid="metric-container"] {
-    background: white;
+    background: #262730;
     padding: 1rem;
     border-radius: 12px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
 }
 
 /* Expander styling */
 .streamlit-expanderHeader {
-    background: white;
+    background: #262730;
     border-radius: 12px;
+    color: white;
 }
 
 /* Sidebar */
@@ -255,6 +262,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+# ============================================================
 # INPUT SECTION
 
 st.markdown("### 📄 Upload Your Document")
@@ -479,7 +487,7 @@ if analyze_pdf_btn and uploaded_file:
 
 st.markdown("""
 <div class="footer">
-    <p>💡 <strong>Legal Document Simplifier</strong> | Built with AI & ❤️</p>
+    <p>💡 <strong>Legal Document Simplifier</strong> | Built by  Aditya & AI❤️</p>
     <p style="opacity: 0.7; font-size: 0.9rem;">
         This tool uses advanced AI to help understand legal language. 
         Always consult a qualified legal professional for official advice.

@@ -4,7 +4,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
-PROJECT_DETAILS.md
+.PROJECT_DETAILS.md
 env/
 venv/
 ENV/

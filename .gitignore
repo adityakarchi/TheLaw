@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *.so
 .Python
+PROJECT_DETAILS.md
 env/
 venv/
 ENV/
@@ -14,6 +15,7 @@ build/
 # Environment variables
 .env
 *.env
+
 !.env.example
 
 # Model files - too large for GitHub

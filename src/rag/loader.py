@@ -11,7 +11,7 @@ from typing import List, Optional, Union
 from pathlib import Path
 from dataclasses import dataclass, field
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 
 logger = logging.getLogger(__name__)

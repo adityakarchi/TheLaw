@@ -14,43 +14,29 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-# ── Load .env ────────────────────────────────────────────────────────
-
 load_dotenv()
-
-# ── Paths ────────────────────────────────────────────────────────────
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 MODELS_DIR = PROJECT_ROOT / "models"
 DATA_DIR = PROJECT_ROOT / "data"
 FAISS_INDEX_DIR = DATA_DIR / "faiss_index"
 
-# ── LLM Settings ────────────────────────────────────────────────────
-
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 LLM_MODEL: str = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.3"))
 LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "2048"))
-
-# ── Embedding Settings ──────────────────────────────────────────────
 
 EMBEDDING_MODEL: str = os.getenv(
     "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
 )
 EMBEDDING_DEVICE: str = os.getenv("EMBEDDING_DEVICE", "cpu")
 
-# ── RAG Settings ─────────────────────────────────────────────────────
-
 CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "1000"))
 CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "200"))
 RETRIEVER_TOP_K: int = int(os.getenv("RETRIEVER_TOP_K", "4"))
 
-# ── Detection Settings ──────────────────────────────────────────────
-
 MIN_LEGAL_SCORE: float = float(os.getenv("MIN_LEGAL_SCORE", "5.0"))
 CONFIDENCE_THRESHOLD_LEGAL: float = float(os.getenv("CONFIDENCE_THRESHOLD_LEGAL", "0.50"))
-
-# ── Factories ────────────────────────────────────────────────────────
 
 
 def _validate_api_key() -> str:

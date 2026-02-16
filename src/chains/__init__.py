@@ -3,9 +3,11 @@
 from src.chains.simplify_chain import get_simplify_chain, simplify_with_context
 from src.chains.risk_chain import get_risk_chain, analyze_risks
 from src.chains.qa_chain import get_qa_chain, answer_question
+from src.chains.case_chain import analyze_case, explain_single_section
 
 __all__ = [
     "get_simplify_chain", "simplify_with_context",
     "get_risk_chain", "analyze_risks",
     "get_qa_chain", "answer_question",
+    "analyze_case", "explain_single_section",
 ]

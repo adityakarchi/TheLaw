@@ -15,7 +15,7 @@ from src.utils.config import get_llm, LLM_MODEL
 
 logger = logging.getLogger(__name__)
 
-# ── Prompt Templates ────────────────────────────────────────────────
+# Prompt templates
 
 SYSTEM_PROMPT = """You are a senior legal translator with 20 years of experience converting
 complex legal documents into clear, plain English that any non-lawyer can understand.
@@ -61,7 +61,7 @@ SIMPLIFIED VERSION:"""),
 ])
 
 
-# ── Chain Construction ───────────────────────────────────────────────
+# Chain construction
 
 def get_simplify_chain(llm: Optional[ChatGroq] = None):
     """Build a LangChain simplification chain with RAG context support."""
@@ -75,7 +75,7 @@ def get_simplify_chain_no_context(llm: Optional[ChatGroq] = None):
     return SIMPLIFY_NO_CONTEXT_PROMPT | _llm | StrOutputParser()
 
 
-# ── High-Level API ──────────────────────────────────────────────────
+# High-level API
 
 def simplify_with_context(
     text: str,

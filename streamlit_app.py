@@ -1,12 +1,8 @@
-"""Legal AI Assistant — Production Streamlit Interface.
+"""LEGAL AUTONOMOUS AI PLATFORM — Streamlit Interface.
 
-Full-featured UI:
-  - Upload PDF or paste text
-  - Detect legal documents with confidence scoring
-  - Simplify to plain English via RAG + LLM
-  - Risk analysis with severity ratings
-  - Interactive contract Q&A
-  - Download results
+TWO autonomous products:
+  1. Legal Document Simplifier — Upload PDF / paste → detect → simplify → risk → Q&A
+  2. Legal Case Research Assistant (Lawyer AI) — Describe case → FAISS law search → LLM explanation
 """
 
 import streamlit as st
@@ -17,25 +13,25 @@ import time
 import logging
 from pathlib import Path
 
-# ── Path Setup ───────────────────────────────────────────────────────
+# Path setup
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.graph.workflow import run_full_analysis, run_qa, reset_retriever
+from src.graph.workflow import run_full_analysis, run_qa, reset_retriever, run_case_research
 from src.utils.config import check_api_connection
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── Page Config ──────────────────────────────────────────────────────
+# Page config
 
 st.set_page_config(
-    page_title="Legal AI Assistant",
+    page_title="Legal AI Platform",
     page_icon="⚖️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ── Professional Dark Theme CSS ──────────────────────────────────────
+# Professional dark theme CSS
 
 st.markdown("""
 <style>
@@ -86,6 +82,23 @@ st.markdown("""
     margin: 0.75rem 0;
     color: #e0e0e0;
     line-height: 1.7;
+}
+
+/* Clean analysis section styling */
+[data-testid="stExpander"] details {
+    background: #1a1a2e;
+    border: 1px solid #333;
+    border-radius: 10px;
+}
+[data-testid="stExpander"] summary {
+    font-weight: 600;
+    color: #FAFAFA;
+}
+[data-testid="stMarkdownContainer"] h4 {
+    color: #667eea;
+    margin-top: 1rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid #333;
 }
 
 .simplified-block {
@@ -159,7 +172,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Session State Initialization ──────────────────────────────────────
+# Session state initialization
 
 if "analysis_result" not in st.session_state:
     st.session_state.analysis_result = None
@@ -167,11 +180,29 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "document_loaded" not in st.session_state:
     st.session_state.document_loaded = False
+if "case_result" not in st.session_state:
+    st.session_state.case_result = None
+if "case_history" not in st.session_state:
+    st.session_state.case_history = []
+if "app_mode" not in st.session_state:
+    st.session_state.app_mode = "📄 Document Simplifier"
 
-# ── Sidebar ───────────────────────────────────────────────────────────
+# Sidebar
 
 with st.sidebar:
-    st.markdown("## ⚙️ Settings")
+    st.markdown("## ⚖️ Legal AI Platform")
+    st.markdown("---")
+
+    st.markdown("### 🔀 Select Product")
+    mode = st.radio(
+        "Choose your tool:",
+        ["📄 Document Simplifier", "🔍 Case Research Assistant"],
+        index=0 if st.session_state.app_mode == "📄 Document Simplifier" else 1,
+        key="mode_selector",
+        label_visibility="collapsed",
+    )
+    st.session_state.app_mode = mode
+
     st.markdown("---")
 
     st.markdown("### 🔌 API Status")
@@ -185,33 +216,47 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("### 🏗️ Architecture")
-    st.markdown("""
-    **RAG Pipeline**
-    - Embeddings: `sentence-transformers`
-    - Vector DB: `FAISS`
-    - LLM: `Groq (Llama 3.1)`
 
-    **Workflow**: `LangGraph`
-    **Chains**: `LangChain`
+    if mode == "📄 Document Simplifier":
+        st.markdown("""
+        **Pipeline 1: Document Simplifier**
+        - Upload PDF / paste text
+        - Local legal detection (no LLM)
+        - FAISS vector search
+        - Groq LLM for simplification
+        - Local risk scoring
+        - Interactive Q&A
+        """)
+    else:
+        st.markdown("""
+        **Pipeline 2: Case Research**
+        - Describe case in natural language
+        - FAISS search over Indian laws
+        - IPC, CrPC, Evidence Act corpus
+        - Groq LLM for explanation ONLY
+        - Applicable sections + punishment
+        - Winning probability estimate
+        """)
+
+    st.markdown("---")
+    st.markdown("### 📖 Tech Stack")
+    st.markdown("""
+    - **Embeddings**: `sentence-transformers`
+    - **Vector DB**: `FAISS`
+    - **LLM**: `Groq (Llama 3.1)`
+    - **Workflow**: `LangGraph`
+    - **Chains**: `LangChain`
     """)
 
     st.markdown("---")
-    st.markdown("### 📖 About")
-    st.markdown("""
-    **Legal AI Assistant** uses RAG + LangGraph to:
-    1. 🔍 Detect legal documents
-    2. ✨ Simplify to plain English
-    3. ⚠️ Analyze risky clauses
-    4. 💬 Answer contract questions
 
-    ---
+    st.markdown("""
     ⚠️ *For informational purposes only.
     Always consult a legal professional.*
     """)
 
-    if st.session_state.document_loaded:
-        st.markdown("---")
-        st.success("📄 Document loaded")
+    # Clear buttons
+    if mode == "📄 Document Simplifier" and st.session_state.document_loaded:
         if st.button("🗑️ Clear Document", use_container_width=True):
             reset_retriever()
             st.session_state.analysis_result = None
@@ -219,15 +264,29 @@ with st.sidebar:
             st.session_state.document_loaded = False
             st.rerun()
 
+    if mode == "🔍 Case Research Assistant" and st.session_state.case_result:
+        if st.button("🗑️ Clear Case Results", use_container_width=True):
+            st.session_state.case_result = None
+            st.session_state.case_history = []
+            st.rerun()
 
-# ── Hero Header ───────────────────────────────────────────────────────
 
-st.markdown("""
-<div class="hero">
-    <h1>⚖️ Legal AI Assistant</h1>
-    <p>RAG-powered legal document analysis — simplify, assess risk, and ask questions</p>
-</div>
-""", unsafe_allow_html=True)
+# Hero header
+
+if st.session_state.app_mode == "📄 Document Simplifier":
+    st.markdown("""
+    <div class="hero">
+        <h1>📄 Legal Document Simplifier</h1>
+        <p>RAG-powered legal document analysis — simplify, assess risk, and ask questions</p>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown("""
+    <div class="hero">
+        <h1>🔍 Legal Case Research Assistant</h1>
+        <p>Describe your legal case — AI searches Indian laws (IPC, CrPC, Evidence Act) and explains applicable sections</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # =====================================================================
@@ -264,205 +323,415 @@ def execute_analysis(input_data, input_type: str):
 
 
 # =====================================================================
-# INPUT SECTION
+# MODE: DOCUMENT SIMPLIFIER
 # =====================================================================
 
-st.markdown("### 📄 Upload Your Document")
-tab_text, tab_pdf = st.tabs(["📝 Paste Text", "📁 Upload PDF"])
+if st.session_state.app_mode == "📄 Document Simplifier":
 
-with tab_text:
-    user_text = st.text_area(
-        "Enter legal document text:",
-        height=250,
-        placeholder=(
-            "Paste your contract, agreement, terms of service, or any legal document here…\n\n"
-            "Example: This Agreement is entered into as of the Effective Date between "
-            "Company Inc. (\"Company\") and the Client…"
-        ),
-    )
-    analyze_text_btn = st.button("🔍 Analyze Document", type="primary",
-                                  use_container_width=True, key="analyze_text")
+    st.markdown("### 📄 Upload Your Document")
+    tab_text, tab_pdf = st.tabs(["📝 Paste Text", "📁 Upload PDF"])
 
-with tab_pdf:
-    uploaded_file = st.file_uploader("Upload a PDF document", type=["pdf"],
-                                      help="PDF up to 10 MB")
-    if uploaded_file:
-        st.info(f"📄 **{uploaded_file.name}** ({uploaded_file.size / 1024:.1f} KB)")
-    analyze_pdf_btn = st.button("🔍 Analyze PDF", type="primary",
-                                 use_container_width=True, key="analyze_pdf",
-                                 disabled=not uploaded_file)
+    with tab_text:
+        user_text = st.text_area(
+            "Enter legal document text:",
+            height=250,
+            placeholder=(
+                "Paste your contract, agreement, terms of service, or any legal document here…\n\n"
+                "Example: This Agreement is entered into as of the Effective Date between "
+                "Company Inc. (\"Company\") and the Client…"
+            ),
+        )
+        analyze_text_btn = st.button("🔍 Analyze Document", type="primary",
+                                      use_container_width=True, key="analyze_text")
 
+    with tab_pdf:
+        uploaded_file = st.file_uploader("Upload a PDF document", type=["pdf"],
+                                          help="PDF up to 10 MB")
+        if uploaded_file:
+            st.info(f"📄 **{uploaded_file.name}** ({uploaded_file.size / 1024:.1f} KB)")
+        analyze_pdf_btn = st.button("🔍 Analyze PDF", type="primary",
+                                     use_container_width=True, key="analyze_pdf",
+                                     disabled=not uploaded_file)
 
-# ── Trigger Analysis ──────────────────────────────────────────────────
+    # Trigger analysis
 
-if analyze_text_btn:
-    if not user_text.strip():
-        st.warning("⚠️ Please enter some text to analyze.")
-    else:
-        execute_analysis(user_text, "text")
-
-if analyze_pdf_btn and uploaded_file:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        tmp.write(uploaded_file.read())
-        tmp_path = tmp.name
-    try:
-        execute_analysis(tmp_path, "pdf")
-    finally:
-        os.unlink(tmp_path)
-
-
-# =====================================================================
-# RESULTS DISPLAY
-# =====================================================================
-
-result = st.session_state.analysis_result
-
-if result:
-    st.markdown("---")
-
-    # ── Error Check ───────────────────────────────────────────────────
-    if result.get("error"):
-        st.error(f"⚠️ {result['error']}")
-
-    # ── Detection Results ─────────────────────────────────────────────
-    st.markdown("### 📊 Analysis Results")
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        if result.get("is_legal"):
-            st.markdown('<span class="badge-legal">✅ LEGAL DOCUMENT</span>',
-                        unsafe_allow_html=True)
+    if analyze_text_btn:
+        if not user_text.strip():
+            st.warning("⚠️ Please enter some text to analyze.")
         else:
-            st.markdown('<span class="badge-not-legal">❌ NOT LEGAL</span>',
-                        unsafe_allow_html=True)
+            execute_analysis(user_text, "text")
 
-    with col2:
-        conf = result.get("legal_confidence", 0)
-        st.metric("Confidence", f"{int(conf * 100)}%")
-        render_confidence_bar(conf)
+    if analyze_pdf_btn and uploaded_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(uploaded_file.read())
+            tmp_path = tmp.name
+        try:
+            execute_analysis(tmp_path, "pdf")
+        finally:
+            os.unlink(tmp_path)
 
-    with col3:
-        st.metric("Legal Terms", len(result.get("detected_terms", [])))
+    # Results display
 
-    with col4:
-        st.metric("Chunks Indexed", result.get("chunk_count", 0))
+    result = st.session_state.analysis_result
 
-    # ── Explanation ───────────────────────────────────────────────────
-    explanation = result.get("legal_explanation", "")
-    if explanation:
-        st.info(explanation)
+    if result:
+        st.markdown("---")
 
-    # ── Detected Terms ────────────────────────────────────────────────
-    terms = result.get("detected_terms", [])
-    if terms:
-        with st.expander("🏷️ Detected Legal Terms", expanded=False):
-            render_terms(terms)
+        if result.get("error"):
+            st.error(f"⚠️ {result['error']}")
 
-    # ── NOT LEGAL → stop here ─────────────────────────────────────────
-    if not result.get("is_legal"):
-        st.warning("This does not appear to be a legal document. "
-                    "Upload a contract, agreement, or terms of service to get full analysis.")
+        st.markdown("### 📊 Analysis Results")
 
-        with st.expander("📄 Input Text Preview"):
-            raw = result.get("raw_text", "")
-            st.text(raw[:2000] + ("…" if len(raw) > 2000 else ""))
+        col1, col2, col3, col4 = st.columns(4)
 
-    else:
-        # ── Simplified Version ────────────────────────────────────────
-        simplified = result.get("simplified_text", "")
-        if simplified and not simplified.startswith("["):
-            st.markdown("### ✨ Simplified Version")
-            st.markdown(simplified)
+        with col1:
+            if result.get("is_legal"):
+                st.markdown('<span class="badge-legal">✅ LEGAL DOCUMENT</span>',
+                            unsafe_allow_html=True)
+            else:
+                st.markdown('<span class="badge-not-legal">❌ NOT LEGAL</span>',
+                            unsafe_allow_html=True)
+
+        with col2:
+            conf = result.get("legal_confidence", 0)
+            st.metric("Confidence", f"{int(conf * 100)}%")
+            render_confidence_bar(conf)
+
+        with col3:
+            st.metric("Legal Terms", len(result.get("detected_terms", [])))
+
+        with col4:
+            st.metric("Chunks Indexed", result.get("chunk_count", 0))
+
+        explanation = result.get("legal_explanation", "")
+        if explanation:
+            st.info(explanation)
+
+        terms = result.get("detected_terms", [])
+        if terms:
+            with st.expander("🏷️ Detected Legal Terms", expanded=False):
+                render_terms(terms)
+
+        if not result.get("is_legal"):
+            st.warning("This does not appear to be a legal document. "
+                        "Upload a contract, agreement, or terms of service to get full analysis.")
+
+            with st.expander("📄 Input Text Preview"):
+                raw = result.get("raw_text", "")
+                st.text(raw[:2000] + ("…" if len(raw) > 2000 else ""))
+
+        else:
+            simplified = result.get("simplified_text", "")
+            if simplified and not simplified.startswith("["):
+                st.markdown("### ✨ Simplified Version")
+                st.markdown(simplified)
+
+                st.download_button(
+                    "📥 Download Simplified Text",
+                    data=simplified,
+                    file_name="simplified_legal_document.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
+            elif simplified:
+                st.warning(simplified)
+
+            risk = result.get("risk_analysis", "")
+            if risk and not risk.startswith("["):
+                st.markdown("### ⚠️ Risk Analysis")
+                st.markdown(risk)
+            elif risk:
+                st.warning(risk)
+
+            with st.expander("📜 Original Legal Text", expanded=False):
+                raw = result.get("raw_text", "")
+                st.text(raw[:8000] + ("…" if len(raw) > 8000 else ""))
+
+            proc_ms = result.get("processing_time_ms", 0)
+            if proc_ms:
+                st.caption(f"⏱️ Total processing time: {proc_ms / 1000:.1f}s")
+
+        # Contract Q&A
+
+        if result.get("is_legal") and st.session_state.document_loaded:
+            st.markdown("---")
+            st.markdown("### 💬 Ask Questions About This Contract")
+
+            for entry in st.session_state.chat_history:
+                with st.chat_message("user"):
+                    st.write(entry["question"])
+                with st.chat_message("assistant"):
+                    st.markdown(entry["answer"])
+
+            question = st.chat_input("Ask a question about the contract…")
+
+            if question:
+                with st.chat_message("user"):
+                    st.write(question)
+
+                with st.chat_message("assistant"):
+                    with st.spinner("Searching document…"):
+                        answer = run_qa(question)
+                    st.markdown(answer)
+
+                st.session_state.chat_history.append({
+                    "question": question,
+                    "answer": answer,
+                })
+
+            st.markdown("**💡 Try asking:**")
+            suggested = [
+                "What are the main obligations?",
+                "Can they terminate anytime?",
+                "What are my risks?",
+                "Any penalty clauses?",
+                "What if there's a breach?",
+            ]
+            cols = st.columns(len(suggested))
+            for i, sq in enumerate(suggested):
+                with cols[i]:
+                    if st.button(sq, key=f"sq_{i}", use_container_width=True):
+                        with st.spinner("Searching document…"):
+                            answer = run_qa(sq)
+                        st.session_state.chat_history.append({
+                            "question": sq,
+                            "answer": answer,
+                        })
+                        st.rerun()
+
+
+# =====================================================================
+# MODE: CASE RESEARCH ASSISTANT
+# =====================================================================
+
+else:
+
+    st.markdown("### 📝 Describe Your Legal Case")
+    st.markdown("""
+    <div class="card">
+        <p style="color:#A0A0A0; margin:0;">
+        Describe the incident or legal situation in natural language. The AI will search
+        through <strong>IPC</strong>, <strong>CrPC</strong>, and <strong>Indian Evidence Act</strong>
+        to find applicable sections, punishments, and provide legal guidance.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    case_description = st.text_area(
+        "Case Description:",
+        height=200,
+        placeholder=(
+            "Example: A person was stabbed during a robbery attempt at night. "
+            "The victim survived but suffered serious injuries. The attacker also "
+            "threatened the victim's family. What sections apply?\n\n"
+            "Or: Someone posted defamatory content about a public figure on social media..."
+        ),
+        key="case_input",
+    )
+
+    # Suggested case examples
+    st.markdown("**💡 Quick Examples:**")
+    example_cols = st.columns(3)
+    examples = [
+        ("🔪 Robbery & Assault", "A gang of 3 people robbed a jewellery shop at night using weapons. They assaulted the shop owner causing grievous injuries. One of the accused was a minor."),
+        ("💻 Cyber Crime", "Someone hacked into another person's bank account and transferred money. They also used fake identity documents for KYC verification."),
+        ("🏠 Domestic Violence", "A woman is facing continuous physical and mental abuse from her husband and in-laws over dowry demands. She wants to file a case."),
+    ]
+
+    for i, (label, desc) in enumerate(examples):
+        with example_cols[i]:
+            if st.button(label, key=f"case_ex_{i}", use_container_width=True):
+                st.session_state["case_prefill"] = desc
+                st.rerun()
+
+    # Apply prefill
+    if "case_prefill" in st.session_state:
+        case_description = st.session_state.pop("case_prefill")
+
+    analyze_case_btn = st.button(
+        "🔍 Research Applicable Laws",
+        type="primary",
+        use_container_width=True,
+        key="analyze_case",
+    )
+
+    # Trigger case research
+
+    if analyze_case_btn:
+        if not case_description or not case_description.strip():
+            st.warning("⚠️ Please describe the legal case or incident.")
+        else:
+            with st.spinner("🔄 Searching Indian law corpus (FAISS) → Analyzing with LLM…"):
+                start = time.time()
+                case_result = run_case_research(case_description.strip())
+                total_ms = int((time.time() - start) * 1000)
+                case_result["processing_time_ms"] = total_ms
+
+            st.session_state.case_result = case_result
+            st.session_state.case_history.append({
+                "description": case_description.strip(),
+                "result": case_result,
+            })
+
+    # Case results display
+
+    case_result = st.session_state.case_result
+
+    if case_result:
+        st.markdown("---")
+
+        if case_result.get("error"):
+            st.error(f"⚠️ {case_result['error']}")
+
+        # Metrics row
+        st.markdown("### 📊 Research Results")
+
+        mcol1, mcol2, mcol3 = st.columns(3)
+        with mcol1:
+            st.metric("Sections Found", case_result.get("case_sections_found", 0))
+        with mcol2:
+            proc_ms = case_result.get("processing_time_ms", 0)
+            st.metric("Processing Time", f"{proc_ms / 1000:.1f}s")
+        with mcol3:
+            n_laws = len(case_result.get("retrieved_laws", []))
+            st.metric("Laws Retrieved", n_laws)
+
+        # Retrieved law sections
+        retrieved_laws = case_result.get("retrieved_laws", [])
+        if retrieved_laws:
+            st.markdown("### 📜 Applicable Law Sections")
+
+            for i, law in enumerate(retrieved_laws):
+                section = law.get("section", "N/A")
+                title = law.get("title", "N/A")
+                act = law.get("act_name", "N/A")
+                score = law.get("confidence", 0)
+                crime = law.get("crime", "")
+                punishment = law.get("punishment", "")
+                jail = law.get("jail_term", "")
+                fine = law.get("fine", "")
+                bailable = law.get("bailable", "")
+                cognizable = law.get("cognizable", "")
+
+                pct = int(score * 100) if score <= 1 else int(score)
+
+                with st.expander(
+                    f"**Section {section}** — {title} ({act}) | Relevance: {pct}%",
+                    expanded=(i < 3),
+                ):
+                    cols = st.columns(2)
+                    with cols[0]:
+                        st.markdown(f"**🏛️ Act:** {act}")
+                        st.markdown(f"**📌 Section:** {section}")
+                        st.markdown(f"**⚖️ Crime:** {crime}")
+                        st.markdown(f"**🔒 Cognizable:** {cognizable}")
+                    with cols[1]:
+                        st.markdown(f"**⚠️ Punishment:** {punishment}")
+                        st.markdown(f"**🏢 Jail Term:** {jail}")
+                        st.markdown(f"**💰 Fine:** {fine}")
+                        st.markdown(f"**🔓 Bailable:** {bailable}")
+
+                    render_confidence_bar(score if score <= 1 else score / 100)
+
+        # LLM Analysis
+        analysis = case_result.get("case_analysis", "")
+        if analysis and not analysis.startswith("["):
+            st.markdown("### 🧠 AI Legal Analysis")
+
+            # Parse and render each section cleanly
+            sections = analysis.split("\n## ")
+
+            for idx_s, section in enumerate(sections):
+                if idx_s == 0 and not section.startswith("##"):
+                    # First block (may be intro or "## Case Analysis" without leading \n)
+                    section_text = section.lstrip("# ").strip()
+                    if section_text:
+                        # Check if it starts with a heading
+                        if section.strip().startswith("##"):
+                            heading = section.strip().split("\n", 1)
+                            title = heading[0].lstrip("# ").strip()
+                            body = heading[1].strip() if len(heading) > 1 else ""
+                            st.markdown(f"#### {title}")
+                            if body:
+                                st.markdown(body)
+                        else:
+                            st.markdown(section.strip())
+                else:
+                    # Subsequent sections: split heading from body
+                    parts = section.split("\n", 1)
+                    title = parts[0].lstrip("# ").strip()
+                    body = parts[1].strip() if len(parts) > 1 else ""
+
+                    # Color-coded containers per section type
+                    if "applicable" in title.lower():
+                        icon = "📜"
+                    elif "confidence" in title.lower():
+                        icon = "📊"
+                    elif "recommended" in title.lower() or "action" in title.lower():
+                        icon = "✅"
+                    elif "winning" in title.lower() or "probability" in title.lower():
+                        icon = "🎯"
+                    elif "disclaimer" in title.lower():
+                        icon = "⚠️"
+                    elif "case" in title.lower() and "analysis" in title.lower():
+                        icon = "🔍"
+                    else:
+                        icon = "📌"
+
+                    with st.container():
+                        st.markdown(f"#### {icon} {title}")
+
+                        if body:
+                            # Handle sub-sections (### headings for individual laws)
+                            sub_sections = body.split("\n### ")
+
+                            if len(sub_sections) > 1:
+                                # First part before any ### 
+                                intro = sub_sections[0].strip()
+                                if intro:
+                                    st.markdown(intro)
+
+                                # Each law section as an expander
+                                for sub in sub_sections[1:]:
+                                    sub_parts = sub.split("\n", 1)
+                                    sub_title = sub_parts[0].strip()
+                                    sub_body = sub_parts[1].strip() if len(sub_parts) > 1 else ""
+
+                                    with st.expander(f"⚖️ {sub_title}", expanded=True):
+                                        if sub_body:
+                                            st.markdown(sub_body)
+                            else:
+                                st.markdown(body)
+
+                        st.markdown("---")
 
             st.download_button(
-                "📥 Download Simplified Text",
-                data=simplified,
-                file_name="simplified_legal_document.txt",
+                "📥 Download Case Analysis",
+                data=analysis,
+                file_name="case_analysis_report.txt",
                 mime="text/plain",
                 use_container_width=True,
             )
-        elif simplified:
-            st.warning(simplified)
+        elif analysis:
+            st.warning(analysis)
 
-        # ── Risk Analysis ─────────────────────────────────────────────
-        risk = result.get("risk_analysis", "")
-        if risk and not risk.startswith("["):
-            st.markdown("### ⚠️ Risk Analysis")
-            st.markdown(risk)
-        elif risk:
-            st.warning(risk)
+    # Case history
 
-        # ── Original Text ─────────────────────────────────────────────
-        with st.expander("📜 Original Legal Text", expanded=False):
-            raw = result.get("raw_text", "")
-            st.text(raw[:8000] + ("…" if len(raw) > 8000 else ""))
-
-        # ── Processing Time ───────────────────────────────────────────
-        proc_ms = result.get("processing_time_ms", 0)
-        if proc_ms:
-            st.caption(f"⏱️ Total processing time: {proc_ms / 1000:.1f}s")
-
-
-    # ==================================================================
-    # CONTRACT Q&A SECTION
-    # ==================================================================
-
-    if result.get("is_legal") and st.session_state.document_loaded:
+    history = st.session_state.case_history
+    if len(history) > 1:
         st.markdown("---")
-        st.markdown("### 💬 Ask Questions About This Contract")
-
-        # Show chat history
-        for entry in st.session_state.chat_history:
-            with st.chat_message("user"):
-                st.write(entry["question"])
-            with st.chat_message("assistant"):
-                st.markdown(entry["answer"])
-
-        # Chat input
-        question = st.chat_input("Ask a question about the contract…")
-
-        if question:
-            with st.chat_message("user"):
-                st.write(question)
-
-            with st.chat_message("assistant"):
-                with st.spinner("Searching document…"):
-                    answer = run_qa(question)
-                st.markdown(answer)
-
-            st.session_state.chat_history.append({
-                "question": question,
-                "answer": answer,
-            })
-
-        # Suggested questions
-        st.markdown("**💡 Try asking:**")
-        suggested = [
-            "What are the main obligations?",
-            "Can they terminate anytime?",
-            "What are my risks?",
-            "Any penalty clauses?",
-            "What if there's a breach?",
-        ]
-        cols = st.columns(len(suggested))
-        for i, sq in enumerate(suggested):
-            with cols[i]:
-                if st.button(sq, key=f"sq_{i}", use_container_width=True):
-                    with st.spinner("Searching document…"):
-                        answer = run_qa(sq)
-                    st.session_state.chat_history.append({
-                        "question": sq,
-                        "answer": answer,
-                    })
-                    st.rerun()
+        with st.expander("📋 Previous Case Searches", expanded=False):
+            for i, entry in enumerate(reversed(history[:-1])):
+                st.markdown(f"**Case {len(history) - 1 - i}:** {entry['description'][:100]}…")
+                n = entry['result'].get('case_sections_found', 0)
+                st.caption(f"Found {n} applicable sections")
 
 
-# ── Footer ────────────────────────────────────────────────────────────
+# Footer
 
 st.markdown("""
 <div class="footer">
-    <p>⚖️ <strong>Legal AI Assistant</strong> | RAG + LangGraph + LangChain + Groq</p>
+    <p>⚖️ <strong>Legal Autonomous AI Platform</strong> | RAG + LangGraph + LangChain + FAISS + Groq</p>
     <p style="opacity:0.6; font-size:0.85rem">
         Built by Aditya & AI ❤️ — For informational purposes only. Consult a legal professional.
     </p>

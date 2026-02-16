@@ -16,7 +16,7 @@ from src.utils.config import get_llm
 
 logger = logging.getLogger(__name__)
 
-# ── Prompt Templates ────────────────────────────────────────────────
+# Prompt templates
 
 RISK_SYSTEM_PROMPT = """You are a senior contract risk analyst with expertise in identifying
 potentially harmful clauses in legal agreements. You protect your client's interests.
@@ -97,7 +97,7 @@ RISK ANALYSIS:"""),
 ])
 
 
-# ── Chain Construction ───────────────────────────────────────────────
+# Chain construction
 
 def get_risk_chain(llm: Optional[ChatGroq] = None):
     """Build a LangChain risk analysis chain."""
@@ -111,7 +111,7 @@ def get_risk_chain_no_context(llm: Optional[ChatGroq] = None):
     return RISK_NO_CONTEXT_PROMPT | _llm | StrOutputParser()
 
 
-# ── High-Level API ──────────────────────────────────────────────────
+# High-level API
 
 def analyze_risks(
     text: str,

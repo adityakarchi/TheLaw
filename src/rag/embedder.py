@@ -12,7 +12,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 
 logger = logging.getLogger(__name__)
 
-# ── Defaults ────────────────────────────────────────────────────────
+# Defaults
 
 DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_DEVICE = "cpu"

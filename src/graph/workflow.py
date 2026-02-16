@@ -1,15 +1,14 @@
-"""LangGraph Workflow — orchestrates the full Legal AI pipeline.
+"""LangGraph Workflow — orchestrates the full Legal AI Platform.
 
-Nodes:
-  1. ingest_node        — load document, chunk, build FAISS index
-  2. legal_detect_node  — determine if input is a legal document
-  3. retriever_node     — retrieve context for downstream chains
-  4. simplify_node      — simplify the document to plain English
-  5. risk_node          — identify and explain risky clauses
-  6. qa_node            — answer user questions via RAG
-  7. output_node        — assemble final structured output
+TWO autonomous pipelines:
 
-Conditional edges route around LLM calls when the document is not legal.
+Pipeline 1: Legal Document Simplifier
+  ingest → detect → [if legal] → retrieve → simplify → risk → output
+
+Pipeline 2: Legal Case Research Assistant
+  case_input → law_search (FAISS) → case_explain (LLM) → output
+
+LLM (Groq) is ONLY used for explanation, NOT for retrieval/classification/risk scoring.
 """
 
 import logging
@@ -24,13 +23,15 @@ from src.legal_detector import detect_legal_document
 from src.chains.simplify_chain import simplify_with_context
 from src.chains.risk_chain import analyze_risks
 from src.chains.qa_chain import answer_question
+from src.chains.case_chain import analyze_case
 from src.utils.config import get_llm
 
 logger = logging.getLogger(__name__)
 
-# ── Module-level retriever (shared across a session) ─────────────────
+# Module-level singletons
 
 _retriever: Optional[LegalRetriever] = None
+_law_index = None
 
 
 def _get_retriever() -> LegalRetriever:
@@ -40,10 +41,26 @@ def _get_retriever() -> LegalRetriever:
     return _retriever
 
 
+def _get_law_index():
+    """Lazy-load law index singleton."""
+    global _law_index
+    if _law_index is None:
+        from src.rag.law_index import LawIndexBuilder
+        _law_index = LawIndexBuilder()
+        _law_index.build_index()
+    return _law_index
+
+
 def reset_retriever() -> None:
-    """Reset the shared retriever (e.g., when processing a new document)."""
+    """Reset the shared retriever (new document)."""
     global _retriever
     _retriever = None
+
+
+def reset_law_index() -> None:
+    """Reset the law index (force rebuild)."""
+    global _law_index
+    _law_index = None
 
 
 # =====================================================================
@@ -231,6 +248,70 @@ def output_node(state: GraphState) -> dict:
 
 
 # =====================================================================
+# CASE RESEARCH PIPELINE NODES
+# =====================================================================
+
+
+def case_input_node(state: GraphState) -> dict:
+    """Validate and prepare case description for search."""
+    logger.info("▶ case_input_node")
+    desc = state.get("case_description", "").strip()
+    if not desc:
+        return {"error": "No case description provided.", "case_description": ""}
+    return {"case_description": desc, "pipeline_mode": "case_research"}
+
+
+def law_search_node(state: GraphState) -> dict:
+    """Search Indian law corpus using FAISS (NO LLM). Pure vector search."""
+    logger.info("▶ law_search_node")
+    start = time.time()
+
+    desc = state.get("case_description", "")
+    if not desc:
+        return {"error": "No case description for law search."}
+
+    try:
+        law_idx = _get_law_index()
+        results = law_idx.search_laws(desc, k=8)
+        context = law_idx.get_context_for_llm(desc, k=6)
+        elapsed = int((time.time() - start) * 1000)
+
+        return {
+            "retrieved_laws": results,
+            "law_context": context,
+            "case_sections_found": len(results),
+            "processing_time_ms": state.get("processing_time_ms", 0) + elapsed,
+        }
+    except Exception as e:
+        logger.error(f"Law search failed: {e}")
+        return {"error": f"Law search failed: {e}", "retrieved_laws": [], "law_context": ""}
+
+
+def case_explain_node(state: GraphState) -> dict:
+    """Use LLM (Groq) ONLY for explanation of retrieved sections."""
+    logger.info("▶ case_explain_node")
+    start = time.time()
+
+    desc = state.get("case_description", "")
+    context = state.get("law_context", "")
+    if not context:
+        return {"case_analysis": "No relevant law sections found for this case."}
+
+    try:
+        llm = get_llm()
+        analysis = analyze_case(desc, context, llm)
+        elapsed = int((time.time() - start) * 1000)
+
+        return {
+            "case_analysis": analysis,
+            "processing_time_ms": state.get("processing_time_ms", 0) + elapsed,
+        }
+    except Exception as e:
+        logger.error(f"Case explanation failed: {e}")
+        return {"case_analysis": f"[Case analysis failed: {e}]"}
+
+
+# =====================================================================
 # ROUTING FUNCTIONS
 # =====================================================================
 
@@ -397,3 +478,73 @@ def run_qa(question: str) -> str:
     except Exception as e:
         logger.error(f"QA query failed: {e}")
         return f"Failed to answer: {e}"
+
+
+# =====================================================================
+# CASE RESEARCH WORKFLOW (Pipeline 2)
+# =====================================================================
+
+
+def build_case_research_workflow() -> StateGraph:
+    """Build the Case Research Assistant workflow.
+
+    Graph topology:
+      case_input → law_search → case_explain → output
+    """
+    graph = StateGraph(GraphState)
+
+    graph.add_node("case_input_node", case_input_node)
+    graph.add_node("law_search_node", law_search_node)
+    graph.add_node("case_explain_node", case_explain_node)
+    graph.add_node("output_node", output_node)
+
+    graph.set_entry_point("case_input_node")
+
+    graph.add_edge("case_input_node", "law_search_node")
+    graph.add_edge("law_search_node", "case_explain_node")
+    graph.add_edge("case_explain_node", "output_node")
+    graph.add_edge("output_node", END)
+
+    return graph.compile()
+
+
+def run_case_research(case_description: str) -> Dict[str, Any]:
+    """Run the case research pipeline.
+
+    Args:
+        case_description: Natural language description of the legal case/incident.
+
+    Returns:
+        Final state with retrieved_laws, case_analysis, etc.
+    """
+    workflow = build_case_research_workflow()
+
+    initial_state: GraphState = {
+        "input_data": "",
+        "input_type": "text",
+        "user_question": "",
+        "raw_text": "",
+        "chunk_count": 0,
+        "is_legal": False,
+        "legal_confidence": 0.0,
+        "legal_classification": "",
+        "detected_terms": [],
+        "category_scores": {},
+        "legal_explanation": "",
+        "retriever_ready": False,
+        "simplified_text": "",
+        "risk_analysis": "",
+        "qa_answer": "",
+        "error": None,
+        "processing_time_ms": 0,
+        # Case research fields
+        "pipeline_mode": "case_research",
+        "case_description": case_description,
+        "retrieved_laws": [],
+        "law_context": "",
+        "case_analysis": "",
+        "case_sections_found": 0,
+    }
+
+    result = workflow.invoke(initial_state)
+    return dict(result)

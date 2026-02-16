@@ -40,7 +40,7 @@ class VectorStore:
     def is_ready(self) -> bool:
         return self._store is not None
 
-    # ── Build / Load ─────────────────────────────────────────────────
+    # Build / Load
 
     def build_from_documents(self, documents: List[Document]) -> "VectorStore":
         """Create a FAISS index from a list of LangChain Documents."""
@@ -61,7 +61,7 @@ class VectorStore:
         self._store.add_documents(documents)
         logger.info(f"Added {len(documents)} documents to existing index")
 
-    # ── Persistence ──────────────────────────────────────────────────
+    # Persistence
 
     def save(self, directory: Optional[str] = None) -> None:
         """Persist FAISS index to disk."""
@@ -89,7 +89,7 @@ class VectorStore:
         logger.info(f"Loaded FAISS index from {load_dir}")
         return self
 
-    # ── Search ───────────────────────────────────────────────────────
+    # Search
 
     def similarity_search(
         self,

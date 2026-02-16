@@ -99,7 +99,7 @@ class DocumentLoader:
         text = self.load(input_data, input_type)
         return self.split_into_chunks(text, metadata={"source_type": input_type})
 
-    # ── Private helpers ──────────────────────────────────────────────
+    # Private helpers
 
     def _load_with_pymupdf(self, file_path_or_buffer) -> str:
         """Extract text using PyMuPDF (fitz)."""

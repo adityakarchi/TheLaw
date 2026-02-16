@@ -1,8 +1,8 @@
-# ── Core Framework ───────────────────────────────────────
+# Core framework
 streamlit>=1.28.0
 python-dotenv>=1.0.0
 
-# ── LLM & LangChain ─────────────────────────────────────
+# LLM & LangChain
 langchain>=0.3.0
 langchain-core>=0.3.0
 langchain-groq>=0.2.0
@@ -12,19 +12,19 @@ langchain-text-splitters>=0.3.0
 langgraph>=0.2.0
 groq>=0.4.0
 
-# ── Embeddings & Vector Store ────────────────────────────
+# Embeddings & vector store
 sentence-transformers>=2.2.0
 faiss-cpu>=1.7.4
 
-# ── PDF Processing ───────────────────────────────────────
+# PDF processing
 PyMuPDF>=1.23.0
 pypdf>=3.17.0
 
-# ── ML / NLP (existing models) ──────────────────────────
+# ML / NLP (existing models)
 scikit-learn>=1.3.0
 torch>=2.0.0
 transformers>=4.35.0
 
-# ── Utilities ────────────────────────────────────────────
+# Utilities
 pandas>=2.0.0
 requests>=2.31.0

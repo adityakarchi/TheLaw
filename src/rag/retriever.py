@@ -47,7 +47,7 @@ class LegalRetriever:
     def chunks(self) -> Optional[List[Document]]:
         return self._chunks
 
-    # ── Ingest ────────────────────────────────────────────────────────
+    # Ingest
 
     def ingest(self, input_data, input_type: str = "text") -> str:
         """Load, chunk, embed, and index a document. Returns cleaned text."""
@@ -67,7 +67,7 @@ class LegalRetriever:
         logger.info(f"Ingestion complete: {len(self._chunks)} chunks indexed")
         return self._raw_text
 
-    # ── Retrieve ──────────────────────────────────────────────────────
+    # Retrieve
 
     def retrieve(self, query: str, k: Optional[int] = None) -> List[Document]:
         """Retrieve top-k relevant chunks for a query."""
@@ -93,7 +93,7 @@ class LegalRetriever:
         kwargs = search_kwargs or {"k": self.top_k}
         return self.vector_store.as_retriever(search_kwargs=kwargs)
 
-    # ── Utilities ─────────────────────────────────────────────────────
+    # Utilities
 
     def get_full_text(self) -> str:
         """Return the full raw text of the ingested document."""

@@ -17,12 +17,16 @@ build/
 *.env
 .env.example
 *.env.example
+.env.example
 
+project_details.md 
+code_explanation.md
 # Model files - too large for GitHub
 models/finetuned_clause_classifier/checkpoint-*/
 models/finetuned_clause_classifier/*.safetensors
 models/finetuned_clause_classifier/checkpoint-*/*.safetensors
 models/finetuned_clause_classifier/checkpoint-*/optimizer.pt
+models/clause_classifier/
 
 # Keep only the final model config
 !models/finetuned_clause_classifier/config.json
@@ -47,6 +51,13 @@ Thumbs.db
 # Data
 *.csv
 *.xlsx
+*.jsonl
+*.faiss
+*.pkl
+data/law_index/
+data/faiss_index/
+data/pile_of_law/
+data/legal_corpus/
 !data/samples/
 
 # Notebooks

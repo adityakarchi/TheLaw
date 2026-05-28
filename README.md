@@ -80,7 +80,6 @@ legal/
    cp .env.example .env
    # Edit .env and add your GROQ_API_KEY
    ```
-   Get a free key at [console.groq.com](https://console.groq.com/)
 
 3. **Run the app**
    ```bash
@@ -111,22 +110,6 @@ legal/
 - **📊 Confidence Scores** — Transparent classification reasoning
 - **🏷️ Legal Term Detection** — Categorized by legal domain
 
-## 🌐 Deployment
 
-### Deploy to Streamlit Cloud
-
-1. Push your code to GitHub.
-2. Sign in to [share.streamlit.io](https://share.streamlit.io/).
-3. Connect your repository and click **Deploy**.
-4. In the "Advanced Settings" (or App Settings > Secrets), add your API key:
-
-```toml
-GROQ_API_KEY = "your_actual_api_key_here"
-```
-
-### Other Platforms
-Set `GROQ_API_KEY` as an environment variable in your hosting provider's dashboard.
-
-## ⚠️ Disclaimer
 
 This tool is for educational purposes only and does not constitute legal advice. Always consult a qualified professional for legal matters.

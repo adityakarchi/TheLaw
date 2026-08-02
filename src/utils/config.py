@@ -8,7 +8,6 @@ import os
 import logging
 from pathlib import Path
 from functools import lru_cache
-from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -16,27 +15,48 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+# ─────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-MODELS_DIR = PROJECT_ROOT / "models"
-DATA_DIR = PROJECT_ROOT / "data"
+MODELS_DIR   = PROJECT_ROOT / "models"
+DATA_DIR     = PROJECT_ROOT / "data"
 FAISS_INDEX_DIR = DATA_DIR / "faiss_index"
 
-GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-LLM_MODEL: str = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
+# ─────────────────────────────────────────────
+# LLM (Groq)
+# ─────────────────────────────────────────────
+GROQ_API_KEY:    str   = os.getenv("GROQ_API_KEY", "")
+LLM_MODEL:       str   = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.3"))
-LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "2048"))
+LLM_MAX_TOKENS:  int   = int(os.getenv("LLM_MAX_TOKENS", "2048"))
 
-EMBEDDING_MODEL: str = os.getenv(
-    "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
-)
+# ─────────────────────────────────────────────
+# AWS / S3
+# ─────────────────────────────────────────────
+AWS_ACCESS_KEY_ID:     str = os.getenv("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+AWS_REGION:            str = os.getenv("AWS_REGION", "ap-south-1")
+S3_BUCKET_NAME:        str = os.getenv("S3_BUCKET_NAME", "")
+
+# ─────────────────────────────────────────────
+# Embeddings
+# ─────────────────────────────────────────────
+EMBEDDING_MODEL:  str = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 EMBEDDING_DEVICE: str = os.getenv("EMBEDDING_DEVICE", "cpu")
 
-CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "1000"))
-CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "200"))
+# ─────────────────────────────────────────────
+# RAG / Retrieval
+# ─────────────────────────────────────────────
+CHUNK_SIZE:      int = int(os.getenv("CHUNK_SIZE", "1000"))
+CHUNK_OVERLAP:   int = int(os.getenv("CHUNK_OVERLAP", "200"))
 RETRIEVER_TOP_K: int = int(os.getenv("RETRIEVER_TOP_K", "4"))
 
-MIN_LEGAL_SCORE: float = float(os.getenv("MIN_LEGAL_SCORE", "5.0"))
-CONFIDENCE_THRESHOLD_LEGAL: float = float(os.getenv("CONFIDENCE_THRESHOLD_LEGAL", "0.50"))
+# ─────────────────────────────────────────────
+# Legal Detection
+# ─────────────────────────────────────────────
+MIN_LEGAL_SCORE:              float = float(os.getenv("MIN_LEGAL_SCORE", "5.0"))
+CONFIDENCE_THRESHOLD_LEGAL:   float = float(os.getenv("CONFIDENCE_THRESHOLD_LEGAL", "0.50"))
 
 
 def _validate_api_key() -> str:
@@ -76,3 +96,12 @@ def check_api_connection() -> tuple[bool, str]:
         return False, "API returned empty response"
     except Exception as e:
         return False, f"Connection failed: {e}"
+
+
+def get_aws_status() -> dict:
+    """Return a dict with AWS/S3 configuration status."""
+    return {
+        "configured": all([AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME]),
+        "bucket":     S3_BUCKET_NAME,
+        "region":     AWS_REGION,
+    }

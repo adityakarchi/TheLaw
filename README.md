@@ -1,19 +1,20 @@
 # ⚖️ Legal AI Assistant
 
-> **Production-grade legal document analysis powered by RAG + LangGraph + LangChain + Groq**
+> **Production-grade legal document analysis powered by RAG + LangGraph + LangChain + Groq + AWS S3**
 
 Upload a contract (PDF or text) and get:
 - **Legal detection** with confidence scoring
 - **Plain-English simplification** via RAG-augmented LLM
 - **Risk analysis** — risky clauses flagged with severity ratings
 - **Interactive Q&A** — ask natural-language questions about the contract
+- **☁️ AWS S3 backup** — every document automatically saved with AES-256 encryption
 
 ## 🏗️ Architecture
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌──────────────┐
 │  Streamlit   │────▶│  LangGraph   │────▶│   Output     │
-│  Frontend    │     │  Workflow     │     │   Display    │
+│  Frontend    │     │  Workflow    │     │   Display    │
 └─────────────┘     └──────┬───────┘     └──────────────┘
                            │
               ┌────────────┼────────────┐
@@ -29,76 +30,105 @@ Upload a contract (PDF or text) and get:
           │ Loader │ │Embedder│ │ FAISS  │
           │(PyMuPDF)│ │(MiniLM)│ │VectorDB│
           └────────┘ └────────┘ └────────┘
+                          │
+                          ▼
+                   ┌─────────────┐
+                   │   AWS S3    │
+                   │  (Mumbai)   │
+                   │ AES-256 enc │
+                   └─────────────┘
 ```
-
-**LangGraph Workflow Nodes:**
-1. `ingest_node` — Load document, chunk, build FAISS index
-2. `legal_detect_node` — Weighted keyword detection + confidence scoring  
-3. `retriever_node` — FAISS similarity search
-4. `simplify_node` — RAG-augmented simplification chain
-5. `risk_node` — Multi-query risk analysis chain
-6. `qa_node` — Contract Q&A via RAG
-7. `output_node` — Assemble final structured output
 
 ## 📁 Project Structure
 
 ```
 legal/
-├── streamlit_app.py          # Streamlit UI
+├── streamlit_app.py          # Streamlit UI + S3 integration
 ├── run.py                    # Entry point
 ├── requirements.txt
-├── .env.example
+├── .env.example              # Copy to .env and fill in keys
 ├── src/
 │   ├── rag/                  # RAG pipeline
-│   │   ├── loader.py         # PDF/text loader + LangChain chunking
-│   │   ├── embedder.py       # sentence-transformers embeddings
-│   │   ├── vectordb.py       # FAISS vector store
-│   │   └── retriever.py      # High-level retrieval facade
+│   │   ├── loader.py
+│   │   ├── embedder.py
+│   │   ├── vectordb.py
+│   │   └── retriever.py
 │   ├── graph/                # LangGraph workflow
-│   │   ├── state.py          # Typed state definition
-│   │   └── workflow.py       # Graph nodes + routing
+│   │   ├── state.py
+│   │   └── workflow.py
 │   ├── chains/               # LangChain chains
-│   │   ├── simplify_chain.py # Simplification chain
-│   │   ├── risk_chain.py     # Risk analysis chain
-│   │   └── qa_chain.py       # Contract Q&A chain
+│   │   ├── simplify_chain.py
+│   │   ├── risk_chain.py
+│   │   └── qa_chain.py
 │   ├── utils/
-│   │   └── config.py         # Centralised configuration
-│   ├── legal_detector.py     # Legal document detection
-│   └── preprocessing.py      # Text cleaning utilities
-└── models/                   # Pre-trained classifiers
+│   │   ├── config.py         # Centralised config + AWS status
+│   │   └── s3_storage.py     # S3 upload / list helpers
+│   ├── legal_detector.py
+│   └── preprocessing.py
+└── models/
 ```
 
 ## 🚀 Quick Start
 
-1. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+**1. Install dependencies**
+```bash
+pip install -r requirements.txt
+```
 
-2. **Set up API key**
-   ```bash
-   cp .env.example .env
-   # Edit .env and add your GROQ_API_KEY
-   ```
+**2. Set up environment**
+```bash
+cp .env.example .env
+# Edit .env — add GROQ_API_KEY at minimum
+# Add AWS keys to enable S3 document storage
+```
 
-3. **Run the app**
-   ```bash
-   python run.py
-   # or: streamlit run streamlit_app.py
-   ```
+**3. Run the app**
+```bash
+streamlit run streamlit_app.py
+```
 
-4. Open **http://localhost:8501**
+Open **http://localhost:8501**
 
 ## 🛠️ Tech Stack
 
 | Component | Technology |
 |-----------|-----------|
-| LLM | Groq (Llama 3.1 8B) |
+| LLM | Groq (Llama 3.1 8B Instant) |
 | Framework | LangChain + LangGraph |
-| Vector DB | FAISS |
-| Embeddings | sentence-transformers (all-MiniLM-L6-v2) |
+| Vector DB | FAISS (local, per-session) |
+| Embeddings | sentence-transformers/all-MiniLM-L6-v2 |
 | Frontend | Streamlit |
-| Language | Python |
+| Storage | AWS S3 (ap-south-1, AES-256) |
+| Language | Python 3.10+ |
+
+## ☁️ AWS S3 Setup
+
+**1. Create S3 bucket** (ap-south-1, block all public access)
+
+**2. Create IAM user** with this policy:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": ["s3:PutObject", "s3:GetObject", "s3:ListBucket", "s3:DeleteObject"],
+    "Resource": [
+      "arn:aws:s3:::YOUR-BUCKET-NAME",
+      "arn:aws:s3:::YOUR-BUCKET-NAME/*"
+    ]
+  }]
+}
+```
+
+**3. Add to `.env`:**
+```
+AWS_ACCESS_KEY_ID=AKIA...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION=ap-south-1
+S3_BUCKET_NAME=your-bucket-name
+```
+
+S3 is **optional** — the app works without it.
 
 ## 🎯 Features
 
@@ -108,8 +138,8 @@ legal/
 - **⚠️ Risk Analysis** — Critical/High/Medium/Low severity ratings
 - **💬 Contract Q&A** — Ask questions grounded in the document
 - **📊 Confidence Scores** — Transparent classification reasoning
-- **🏷️ Legal Term Detection** — Categorized by legal domain
+- **☁️ S3 Storage** — Auto-backup with encryption and upload history
 
+---
 
-
-This tool is for educational purposes only and does not constitute legal advice. Always consult a qualified professional for legal matters.
+> ⚠️ For educational purposes only. Does not constitute legal advice. Always consult a qualified professional.

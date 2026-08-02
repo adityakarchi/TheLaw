@@ -18,6 +18,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from src.graph.workflow import run_full_analysis, run_qa, reset_retriever, run_case_research
 from src.utils.config import check_api_connection
+from src.utils.s3_storage import (
+    upload_pdf_to_s3,
+    upload_text_to_s3,
+    list_uploaded_documents,
+    is_s3_configured,
+    get_s3_console_url,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -239,6 +246,21 @@ with st.sidebar:
         """)
 
     st.markdown("---")
+
+    st.markdown("### ☁️ S3 Storage")
+    if is_s3_configured():
+        st.success("✅ S3 Connected")
+        if st.button("📋 View Uploads", use_container_width=True):
+            docs = list_uploaded_documents()
+            if docs:
+                for d in docs[:5]:
+                    st.caption(f"📄 {d['filename']} ({d['size_kb']} KB) — {d['uploaded_at']}")
+            else:
+                st.info("No documents uploaded yet.")
+    else:
+        st.warning("⚠️ S3 not configured\nAdd AWS keys to .env")
+
+    st.markdown("---")
     st.markdown("### 📖 Tech Stack")
     st.markdown("""
     - **Embeddings**: `sentence-transformers`
@@ -246,6 +268,7 @@ with st.sidebar:
     - **LLM**: `Groq (Llama 3.1)`
     - **Workflow**: `LangGraph`
     - **Chains**: `LangChain`
+    - **Storage**: `AWS S3`
     """)
 
     st.markdown("---")
@@ -360,13 +383,24 @@ if st.session_state.app_mode == "📄 Document Simplifier":
             st.warning("⚠️ Please enter some text to analyze.")
         else:
             execute_analysis(user_text, "text")
+            # Upload text to S3 after successful analysis
+            if is_s3_configured():
+                s3_key = upload_text_to_s3(user_text, "pasted_contract.txt")
+                if s3_key:
+                    st.toast("☁️ Saved to S3: pasted_contract.txt", icon="✅")
 
     if analyze_pdf_btn and uploaded_file:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(uploaded_file.read())
+            file_bytes = uploaded_file.read()
+            tmp.write(file_bytes)
             tmp_path = tmp.name
         try:
             execute_analysis(tmp_path, "pdf")
+            # Upload to S3 after successful analysis
+            if is_s3_configured():
+                s3_key = upload_pdf_to_s3(file_bytes, uploaded_file.name)
+                if s3_key:
+                    st.toast(f"☁️ Saved to S3: {uploaded_file.name}", icon="✅")
         finally:
             os.unlink(tmp_path)
 

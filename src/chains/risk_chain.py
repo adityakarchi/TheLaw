@@ -3,6 +3,8 @@
 Scans legal text for problematic provisions such as unlimited liability,
 unilateral termination rights, penalty clauses, non-compete overreach, etc.
 Returns structured risk output.
+
+Supports multi-language output (Feature 7).
 """
 
 import logging
@@ -25,11 +27,15 @@ Your analysis must be:
 - Thorough: cover ALL types of risk (financial, operational, legal, reputational)
 - Specific: cite the exact language that creates the risk
 - Actionable: recommend concrete changes or negotiation points
-- Prioritized: rank risks by severity (Critical / High / Medium / Low)"""
+- Prioritized: rank risks by severity (Critical / High / Medium / Low)
+
+Respond ENTIRELY in {language}. Use clear, professional {language}."""
 
 RISK_ANALYSIS_PROMPT = ChatPromptTemplate.from_messages([
     ("system", RISK_SYSTEM_PROMPT),
     ("human", """Analyze the following legal text for risky clauses and potential issues.
+
+OUTPUT LANGUAGE: {language}
 
 RELEVANT CONTEXT FROM THE DOCUMENT:
 ---
@@ -67,6 +73,8 @@ RISK ANALYSIS:"""),
 RISK_NO_CONTEXT_PROMPT = ChatPromptTemplate.from_messages([
     ("system", RISK_SYSTEM_PROMPT),
     ("human", """Analyze the following legal text for risky clauses and potential issues.
+
+OUTPUT LANGUAGE: {language}
 
 LEGAL TEXT TO ANALYZE:
 \"\"\"
@@ -117,13 +125,15 @@ def analyze_risks(
     text: str,
     context: str = "",
     llm: Optional[ChatGroq] = None,
+    language: str = "English",
 ) -> str:
     """Analyze a legal document for risky clauses.
 
     Args:
-        text:    The legal text to analyze.
-        context: RAG-retrieved context focused on risk-related clauses.
-        llm:     Optional pre-configured LLM instance.
+        text:     The legal text to analyze.
+        context:  RAG-retrieved context focused on risk-related clauses.
+        llm:      Optional pre-configured LLM instance.
+        language: Output language (default: "English").
 
     Returns:
         Structured risk analysis as a markdown string.
@@ -134,10 +144,10 @@ def analyze_risks(
     try:
         if context.strip():
             chain = get_risk_chain(llm)
-            result = chain.invoke({"text": text, "context": context})
+            result = chain.invoke({"text": text, "context": context, "language": language})
         else:
             chain = get_risk_chain_no_context(llm)
-            result = chain.invoke({"text": text})
+            result = chain.invoke({"text": text, "language": language})
 
         return result.strip()
 

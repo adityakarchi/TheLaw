@@ -1,13 +1,15 @@
 """LEGAL AUTONOMOUS AI PLATFORM — Streamlit Interface.
 
-TWO autonomous products:
-  1. Legal Document Simplifier — Upload PDF / paste → detect → simplify → risk → Q&A
+THREE modes:
+  1. Legal Document Simplifier — Upload PDF / DOCX / paste → detect → simplify → risk → Q&A
   2. Legal Case Research Assistant (Lawyer AI) — Describe case → FAISS law search → LLM explanation
+  3. Contract Comparison — Upload two contracts → clause diff → risk delta
 """
 
 import streamlit as st
 import sys
 import os
+import uuid
 import tempfile
 import time
 import logging
@@ -21,13 +23,44 @@ from src.utils.config import check_api_connection
 from src.utils.s3_storage import (
     upload_pdf_to_s3,
     upload_text_to_s3,
+    upload_docx_to_s3,
     list_uploaded_documents,
     is_s3_configured,
     get_s3_console_url,
 )
 
+# Feature 8: Analytics
+try:
+    from src.utils.analytics import log_analysis_event, load_analytics, get_summary_stats
+    ANALYTICS_AVAILABLE = True
+except ImportError:
+    ANALYTICS_AVAILABLE = False
+
+# Feature 6: PDF Export
+try:
+    from src.utils.pdf_export import generate_analysis_report, generate_case_report
+    PDF_EXPORT_AVAILABLE = True
+except ImportError:
+    PDF_EXPORT_AVAILABLE = False
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# =====================================================================
+# CONSTANTS
+# =====================================================================
+
+MAX_ANALYSES_PER_SESSION = 10
+
+LANGUAGE_OPTIONS = {
+    "English": "English",
+    "हिंदी (Hindi)": "Hindi",
+    "தமிழ் (Tamil)": "Tamil",
+    "বাংলা (Bengali)": "Bengali",
+    "తెలుగు (Telugu)": "Telugu",
+    "मराठी (Marathi)": "Marathi",
+    "ગુજરાતી (Gujarati)": "Gujarati",
+}
 
 # Page config
 
@@ -194,21 +227,121 @@ if "case_history" not in st.session_state:
 if "app_mode" not in st.session_state:
     st.session_state.app_mode = "📄 Document Simplifier"
 
-# Sidebar
+# Feature 9: Rate limiting session counters
+if "analysis_count" not in st.session_state:
+    st.session_state.analysis_count = 0
+if "case_count" not in st.session_state:
+    st.session_state.case_count = 0
+
+# Feature 7: Multi-language default
+if "output_language" not in st.session_state:
+    st.session_state.output_language = "English"
+
+# Feature 8: Session ID for analytics
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())[:8]
+
+# Feature 5: Compare state
+if "compare_result" not in st.session_state:
+    st.session_state.compare_result = None
+
+
+# =====================================================================
+# HELPER FUNCTIONS
+# =====================================================================
+
+
+def render_confidence_bar(confidence: float):
+    pct = int(confidence * 100)
+    cls = "conf-high" if confidence >= 0.7 else "conf-med" if confidence >= 0.4 else "conf-low"
+    st.markdown(f"""
+    <div class="conf-bar"><div class="conf-fill {cls}" style="width:{pct}%"></div></div>
+    """, unsafe_allow_html=True)
+
+
+def render_terms(terms: list):
+    if not terms:
+        return
+    pills = " ".join(f'<span class="term-pill">{t}</span>' for t in terms[:20])
+    st.markdown(f'<div style="margin:0.5rem 0">{pills}</div>', unsafe_allow_html=True)
+
+
+def check_rate_limit(count: int, max_count: int, label: str) -> bool:
+    """Check if session rate limit is reached. Returns True if allowed."""
+    if count >= max_count:
+        st.error(
+            f"⚠️ Session limit reached ({max_count} {label}). "
+            "Refresh the page to start a new session."
+        )
+        st.info("💡 Tip: Streamlit Cloud sessions reset on page refresh.")
+        return False
+    remaining = max_count - count
+    if remaining <= 3:
+        st.warning(f"⚠️ {remaining} {label} remaining this session.")
+    return True
+
+
+def execute_analysis(input_data, input_type: str):
+    """Execute the LangGraph workflow and cache the result."""
+    with st.spinner("🔄 Running full analysis pipeline (detect → embed → simplify → risk)…"):
+        start = time.time()
+        language = st.session_state.get("output_language", "English")
+        result = run_full_analysis(input_data, input_type, output_language=language)
+        total_ms = int((time.time() - start) * 1000)
+        result["processing_time_ms"] = total_ms
+
+    st.session_state.analysis_result = result
+    st.session_state.document_loaded = result.get("is_legal", False)
+    st.session_state.chat_history = []
+    # Feature 9: Increment counter on success
+    st.session_state.analysis_count += 1
+    return result
+
+
+# =====================================================================
+# SIDEBAR
+# =====================================================================
 
 with st.sidebar:
     st.markdown("## ⚖️ Legal AI Platform")
     st.markdown("---")
 
     st.markdown("### 🔀 Select Product")
+    mode_options = ["📄 Document Simplifier", "🔍 Case Research Assistant", "⚖️ Compare Contracts"]
+    current_idx = mode_options.index(st.session_state.app_mode) if st.session_state.app_mode in mode_options else 0
     mode = st.radio(
         "Choose your tool:",
-        ["📄 Document Simplifier", "🔍 Case Research Assistant"],
-        index=0 if st.session_state.app_mode == "📄 Document Simplifier" else 1,
+        mode_options,
+        index=current_idx,
         key="mode_selector",
         label_visibility="collapsed",
     )
     st.session_state.app_mode = mode
+
+    st.markdown("---")
+
+    # Feature 7: Language selector
+    st.markdown("### 🌐 Output Language")
+    selected_lang_label = st.selectbox(
+        "Choose output language:",
+        list(LANGUAGE_OPTIONS.keys()),
+        index=list(LANGUAGE_OPTIONS.values()).index(st.session_state.output_language)
+        if st.session_state.output_language in LANGUAGE_OPTIONS.values()
+        else 0,
+        key="lang_selector",
+        label_visibility="collapsed",
+    )
+    st.session_state.output_language = LANGUAGE_OPTIONS[selected_lang_label]
+
+    st.markdown("---")
+
+    # Feature 9: Usage indicator
+    st.markdown("### 📊 Session Usage")
+    total_used = st.session_state.analysis_count + st.session_state.case_count
+    st.caption(f"📄 Analyses: **{st.session_state.analysis_count}** / {MAX_ANALYSES_PER_SESSION}")
+    st.caption(f"🔍 Case Searches: **{st.session_state.case_count}** / {MAX_ANALYSES_PER_SESSION}")
+    usage_pct = min(total_used / (MAX_ANALYSES_PER_SESSION * 2), 1.0)
+    st.progress(usage_pct, text=f"{int(usage_pct * 100)}% used")
 
     st.markdown("---")
 
@@ -227,7 +360,7 @@ with st.sidebar:
     if mode == "📄 Document Simplifier":
         st.markdown("""
         **Pipeline 1: Document Simplifier**
-        - Upload PDF / paste text
+        - Upload PDF / DOCX / paste text
         - Local legal detection (no LLM)
         - FAISS vector search
         - Groq LLM for simplification
@@ -259,6 +392,93 @@ with st.sidebar:
                 st.info("No documents uploaded yet.")
     else:
         st.warning("⚠️ S3 not configured\nAdd AWS keys to .env")
+
+    # Feature 8: Analytics Dashboard
+    if ANALYTICS_AVAILABLE and is_s3_configured():
+        st.markdown("---")
+        with st.expander("📊 Analytics Dashboard", expanded=False):
+            with st.spinner("Loading analytics…"):
+                try:
+                    import plotly.express as px
+                    df = load_analytics(days=7)
+                    if df.empty:
+                        st.info("No analytics data yet. Analyze a document to start tracking.")
+                    else:
+                        stats = get_summary_stats(df)
+
+                        # Metrics row
+                        am1, am2, am3 = st.columns(3)
+                        am1.metric("Total Analyses", stats["total_analyses"])
+                        am2.metric("Avg Time", f"{stats['avg_processing_time']/1000:.1f}s")
+                        am3.metric("Legal %", f"{stats['legal_percentage']}%")
+
+                        # Risk distribution pie chart
+                        if stats["risk_distribution"]:
+                            risk_df_data = {
+                                "Risk Level": list(stats["risk_distribution"].keys()),
+                                "Count": list(stats["risk_distribution"].values()),
+                            }
+                            fig_pie = px.pie(
+                                risk_df_data,
+                                names="Risk Level",
+                                values="Count",
+                                title="Risk Distribution",
+                                color="Risk Level",
+                                color_discrete_map={
+                                    "Critical Risk": "#eb3349",
+                                    "High Risk": "#f7971e",
+                                    "Moderate Risk": "#ffd200",
+                                    "Low Risk": "#11998e",
+                                    "Unknown": "#667eea",
+                                },
+                                hole=0.4,
+                            )
+                            fig_pie.update_layout(
+                                paper_bgcolor="rgba(0,0,0,0)",
+                                plot_bgcolor="rgba(0,0,0,0)",
+                                font_color="#FAFAFA",
+                                showlegend=True,
+                                margin=dict(t=40, b=10, l=10, r=10),
+                                height=250,
+                            )
+                            st.plotly_chart(fig_pie, use_container_width=True)
+
+                        # Daily bar chart
+                        if stats["daily_counts"]:
+                            daily_data = {
+                                "Date": list(stats["daily_counts"].keys()),
+                                "Analyses": list(stats["daily_counts"].values()),
+                            }
+                            fig_bar = px.bar(
+                                daily_data,
+                                x="Date",
+                                y="Analyses",
+                                title="Analyses (Last 7 Days)",
+                                color_discrete_sequence=["#667eea"],
+                            )
+                            fig_bar.update_layout(
+                                paper_bgcolor="rgba(0,0,0,0)",
+                                plot_bgcolor="rgba(0,0,0,0)",
+                                font_color="#FAFAFA",
+                                xaxis=dict(gridcolor="#333"),
+                                yaxis=dict(gridcolor="#333"),
+                                margin=dict(t=40, b=10, l=10, r=10),
+                                height=200,
+                            )
+                            st.plotly_chart(fig_bar, use_container_width=True)
+
+                        # Last 5 analyses
+                        if "pipeline" in df.columns:
+                            st.markdown("**Recent Activity:**")
+                            recent = df.head(5)
+                            for _, row in recent.iterrows():
+                                ts = str(row.get("timestamp", ""))[:16]
+                                pipeline = str(row.get("pipeline", ""))
+                                t_ms = row.get("processing_time_ms", 0)
+                                t = f"{t_ms/1000:.1f}s" if t_ms else "—"
+                                st.caption(f"🕐 {ts} | {pipeline} | {t}")
+                except Exception as e:
+                    st.warning(f"Analytics unavailable: {e}")
 
     st.markdown("---")
     st.markdown("### 📖 Tech Stack")
@@ -293,6 +513,11 @@ with st.sidebar:
             st.session_state.case_history = []
             st.rerun()
 
+    if mode == "⚖️ Compare Contracts" and st.session_state.compare_result:
+        if st.button("🗑️ Clear Comparison", use_container_width=True):
+            st.session_state.compare_result = None
+            st.rerun()
+
 
 # Hero header
 
@@ -303,46 +528,20 @@ if st.session_state.app_mode == "📄 Document Simplifier":
         <p>RAG-powered legal document analysis — simplify, assess risk, and ask questions</p>
     </div>
     """, unsafe_allow_html=True)
-else:
+elif st.session_state.app_mode == "🔍 Case Research Assistant":
     st.markdown("""
     <div class="hero">
         <h1>🔍 Legal Case Research Assistant</h1>
         <p>Describe your legal case — AI searches Indian laws (IPC, CrPC, Evidence Act) and explains applicable sections</p>
     </div>
     """, unsafe_allow_html=True)
-
-
-# =====================================================================
-# HELPER FUNCTIONS
-# =====================================================================
-
-def render_confidence_bar(confidence: float):
-    pct = int(confidence * 100)
-    cls = "conf-high" if confidence >= 0.7 else "conf-med" if confidence >= 0.4 else "conf-low"
-    st.markdown(f"""
-    <div class="conf-bar"><div class="conf-fill {cls}" style="width:{pct}%"></div></div>
+else:
+    st.markdown("""
+    <div class="hero">
+        <h1>⚖️ Contract Comparison</h1>
+        <p>Upload two contract versions — get clause-level diff with risk delta analysis</p>
+    </div>
     """, unsafe_allow_html=True)
-
-
-def render_terms(terms: list):
-    if not terms:
-        return
-    pills = " ".join(f'<span class="term-pill">{t}</span>' for t in terms[:20])
-    st.markdown(f'<div style="margin:0.5rem 0">{pills}</div>', unsafe_allow_html=True)
-
-
-def execute_analysis(input_data, input_type: str):
-    """Execute the LangGraph workflow and cache the result."""
-    with st.spinner("🔄 Running full analysis pipeline (detect → embed → simplify → risk)…"):
-        start = time.time()
-        result = run_full_analysis(input_data, input_type)
-        total_ms = int((time.time() - start) * 1000)
-        result["processing_time_ms"] = total_ms
-
-    st.session_state.analysis_result = result
-    st.session_state.document_loaded = result.get("is_legal", False)
-    st.session_state.chat_history = []
-    return result
 
 
 # =====================================================================
@@ -352,7 +551,7 @@ def execute_analysis(input_data, input_type: str):
 if st.session_state.app_mode == "📄 Document Simplifier":
 
     st.markdown("### 📄 Upload Your Document")
-    tab_text, tab_pdf = st.tabs(["📝 Paste Text", "📁 Upload PDF"])
+    tab_text, tab_pdf, tab_docx = st.tabs(["📝 Paste Text", "📁 Upload PDF", "📝 Upload Word Doc"])
 
     with tab_text:
         user_text = st.text_area(
@@ -376,11 +575,28 @@ if st.session_state.app_mode == "📄 Document Simplifier":
                                      use_container_width=True, key="analyze_pdf",
                                      disabled=not uploaded_file)
 
+    with tab_docx:
+        uploaded_docx = st.file_uploader(
+            "Upload a Word document",
+            type=["docx"],
+            help="DOCX up to 10 MB",
+            key="docx_uploader",
+        )
+        if uploaded_docx:
+            st.info(f"📝 **{uploaded_docx.name}** ({uploaded_docx.size / 1024:.1f} KB)")
+        analyze_docx_btn = st.button(
+            "🔍 Analyze Word Doc", type="primary",
+            use_container_width=True, key="analyze_docx",
+            disabled=not uploaded_docx,
+        )
+
     # Trigger analysis
 
     if analyze_text_btn:
         if not user_text.strip():
             st.warning("⚠️ Please enter some text to analyze.")
+        elif not check_rate_limit(st.session_state.analysis_count, MAX_ANALYSES_PER_SESSION, "analyses"):
+            pass  # Rate limit hit — message already shown
         else:
             execute_analysis(user_text, "text")
             # Upload text to S3 after successful analysis
@@ -390,19 +606,40 @@ if st.session_state.app_mode == "📄 Document Simplifier":
                     st.toast("☁️ Saved to S3: pasted_contract.txt", icon="✅")
 
     if analyze_pdf_btn and uploaded_file:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            file_bytes = uploaded_file.read()
-            tmp.write(file_bytes)
-            tmp_path = tmp.name
-        try:
-            execute_analysis(tmp_path, "pdf")
-            # Upload to S3 after successful analysis
-            if is_s3_configured():
-                s3_key = upload_pdf_to_s3(file_bytes, uploaded_file.name)
-                if s3_key:
-                    st.toast(f"☁️ Saved to S3: {uploaded_file.name}", icon="✅")
-        finally:
-            os.unlink(tmp_path)
+        if not check_rate_limit(st.session_state.analysis_count, MAX_ANALYSES_PER_SESSION, "analyses"):
+            pass
+        else:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                file_bytes = uploaded_file.read()
+                tmp.write(file_bytes)
+                tmp_path = tmp.name
+            try:
+                execute_analysis(tmp_path, "pdf")
+                # Upload to S3 after successful analysis
+                if is_s3_configured():
+                    s3_key = upload_pdf_to_s3(file_bytes, uploaded_file.name)
+                    if s3_key:
+                        st.toast(f"☁️ Saved to S3: {uploaded_file.name}", icon="✅")
+            finally:
+                os.unlink(tmp_path)
+
+    if analyze_docx_btn and uploaded_docx:
+        if not check_rate_limit(st.session_state.analysis_count, MAX_ANALYSES_PER_SESSION, "analyses"):
+            pass
+        else:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+                docx_bytes = uploaded_docx.read()
+                tmp.write(docx_bytes)
+                tmp_path = tmp.name
+            try:
+                execute_analysis(tmp_path, "docx")
+                # Upload DOCX to S3 after successful analysis
+                if is_s3_configured():
+                    s3_key = upload_docx_to_s3(docx_bytes, uploaded_docx.name)
+                    if s3_key:
+                        st.toast(f"☁️ Saved to S3: {uploaded_docx.name}", icon="✅")
+            finally:
+                os.unlink(tmp_path)
 
     # Results display
 
@@ -460,13 +697,38 @@ if st.session_state.app_mode == "📄 Document Simplifier":
                 st.markdown("### ✨ Simplified Version")
                 st.markdown(simplified)
 
-                st.download_button(
-                    "📥 Download Simplified Text",
-                    data=simplified,
-                    file_name="simplified_legal_document.txt",
-                    mime="text/plain",
-                    use_container_width=True,
-                )
+                # Feature 6: PDF Export
+                if PDF_EXPORT_AVAILABLE:
+                    try:
+                        pdf_bytes = generate_analysis_report(result)
+                        st.download_button(
+                            "📄 Download Full PDF Report",
+                            data=pdf_bytes,
+                            file_name="legal_analysis_report.pdf",
+                            mime="application/pdf",
+                            use_container_width=True,
+                        )
+                        # Upload PDF report to S3
+                        if is_s3_configured():
+                            from src.utils.s3_storage import upload_pdf_to_s3 as _upload
+                            _upload(pdf_bytes, "legal_analysis_report.pdf", prefix="reports")
+                    except Exception as e:
+                        logger.warning(f"PDF generation failed: {e}")
+                        st.download_button(
+                            "📥 Download Simplified Text",
+                            data=simplified,
+                            file_name="simplified_legal_document.txt",
+                            mime="text/plain",
+                            use_container_width=True,
+                        )
+                else:
+                    st.download_button(
+                        "📥 Download Simplified Text",
+                        data=simplified,
+                        file_name="simplified_legal_document.txt",
+                        mime="text/plain",
+                        use_container_width=True,
+                    )
             elif simplified:
                 st.warning(simplified)
 
@@ -480,6 +742,81 @@ if st.session_state.app_mode == "📄 Document Simplifier":
             with st.expander("📜 Original Legal Text", expanded=False):
                 raw = result.get("raw_text", "")
                 st.text(raw[:8000] + ("…" if len(raw) > 8000 else ""))
+
+            # Feature 4: Clause Breakdown Tab
+            try:
+                from src.segmentation import segment_into_clauses
+                from src.classification import get_classifier
+                from src.chains.clause_chain import simplify_clauses_batch
+
+                raw_text = result.get("raw_text", "")
+                clauses = segment_into_clauses(raw_text)
+
+                if clauses:
+                    st.markdown("### 📋 Clause Breakdown")
+
+                    # Classify clauses
+                    classifier = get_classifier()
+                    clause_texts = [c["text"] for c in clauses]
+                    classifications = classifier.classify_batch(clause_texts)
+
+                    # Merge classifications into clause dicts
+                    for clause, clf in zip(clauses, classifications):
+                        clause["type"] = clf["type"]
+                        clause["risk_level"] = clf["risk_level"]
+                        clause["risk_score"] = clf["risk_score"]
+                        clause["confidence"] = clf["confidence"]
+
+                    # Filter controls
+                    fcol1, fcol2 = st.columns([1, 1])
+                    with fcol1:
+                        show_critical = st.checkbox("🔴 Show High Risk Only", key="filter_critical")
+                    with fcol2:
+                        simplify_clauses = st.checkbox("✨ Show Plain English", key="simplify_clauses")
+
+                    # Optionally simplify visible clauses
+                    if simplify_clauses:
+                        with st.spinner("✨ Simplifying clauses…"):
+                            visible = [c for c in clauses if not show_critical or c["risk_level"] == "High"]
+                            simplified_clauses = simplify_clauses_batch(visible, max_clauses=15)
+                            simplified_map = {c["index"]: c for c in simplified_clauses}
+                    else:
+                        simplified_map = {}
+
+                    risk_emoji = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}
+
+                    for i, clause in enumerate(clauses):
+                        if show_critical and clause.get("risk_level") != "High":
+                            continue
+
+                        clf = clause
+                        emoji = risk_emoji.get(clf.get("risk_level", "Low"), "⚪")
+                        heading = clause.get("heading", f"Clause {i+1}")[:60]
+
+                        with st.expander(
+                            f"{emoji} **#{clause['index']}** {heading} — "
+                            f"{clf.get('type', 'General')} ({clf.get('risk_level', 'Low')})",
+                            expanded=False,
+                        ):
+                            col_a, col_b = st.columns([1, 1])
+                            with col_a:
+                                st.markdown(f"**Type:** {clf.get('type', 'General')}")
+                                st.markdown(f"**Risk:** {clf.get('risk_level', 'Low')} ({int(clf.get('risk_score', 0)*100)}%)")
+                                st.markdown(f"**Confidence:** {int(clf.get('confidence', 0)*100)}%")
+                            with col_b:
+                                st.markdown("**Original Clause:**")
+                                st.text(clause["text"][:500])
+
+                            # Show plain English if simplification was requested
+                            sc = simplified_map.get(clause["index"])
+                            if sc:
+                                st.markdown("---")
+                                st.markdown(f"**✨ Plain English:** {sc.get('summary', '')}")
+                                if sc.get("negotiation_tip"):
+                                    st.markdown(f"**💡 Tip:** {sc.get('negotiation_tip', '')}")
+
+            except Exception as e:
+                logger.warning(f"Clause breakdown unavailable: {e}")
 
             proc_ms = result.get("processing_time_ms", 0)
             if proc_ms:
@@ -534,11 +871,28 @@ if st.session_state.app_mode == "📄 Document Simplifier":
                         st.rerun()
 
 
+    # Feature 8: Log analysis event
+    if result and ANALYTICS_AVAILABLE:
+        try:
+            log_analysis_event({
+                "session_id": st.session_state.session_id,
+                "pipeline": "simplifier",
+                "doc_type": "document",
+                "is_legal": result.get("is_legal", False),
+                "risk_level": "Unknown",
+                "processing_time_ms": result.get("processing_time_ms", 0),
+                "chunk_count": result.get("chunk_count", 0),
+                "language": st.session_state.output_language,
+            })
+        except Exception:
+            pass
+
+
 # =====================================================================
 # MODE: CASE RESEARCH ASSISTANT
 # =====================================================================
 
-else:
+elif st.session_state.app_mode == "🔍 Case Research Assistant":
 
     st.markdown("### 📝 Describe Your Legal Case")
     st.markdown("""
@@ -594,6 +948,8 @@ else:
     if analyze_case_btn:
         if not case_description or not case_description.strip():
             st.warning("⚠️ Please describe the legal case or incident.")
+        elif not check_rate_limit(st.session_state.case_count, MAX_ANALYSES_PER_SESSION, "case searches"):
+            pass  # Rate limit hit
         else:
             with st.spinner("🔄 Searching Indian law corpus (FAISS) → Analyzing with LLM…"):
                 start = time.time()
@@ -606,6 +962,24 @@ else:
                 "description": case_description.strip(),
                 "result": case_result,
             })
+            # Feature 9: Increment counter
+            st.session_state.case_count += 1
+
+            # Feature 8: Log case research event
+            if ANALYTICS_AVAILABLE:
+                try:
+                    log_analysis_event({
+                        "session_id": st.session_state.session_id,
+                        "pipeline": "case_research",
+                        "doc_type": "case_description",
+                        "is_legal": True,
+                        "risk_level": "N/A",
+                        "processing_time_ms": case_result.get("processing_time_ms", 0),
+                        "chunk_count": case_result.get("case_sections_found", 0),
+                        "language": st.session_state.output_language,
+                    })
+                except Exception:
+                    pass
 
     # Case results display
 
@@ -739,13 +1113,33 @@ else:
 
                         st.markdown("---")
 
-            st.download_button(
-                "📥 Download Case Analysis",
-                data=analysis,
-                file_name="case_analysis_report.txt",
-                mime="text/plain",
-                use_container_width=True,
-            )
+            # Feature 6: PDF export for case reports
+            if PDF_EXPORT_AVAILABLE:
+                try:
+                    pdf_bytes = generate_case_report(case_result)
+                    st.download_button(
+                        "📄 Download Case Report PDF",
+                        data=pdf_bytes,
+                        file_name="case_research_report.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                    )
+                except Exception:
+                    st.download_button(
+                        "📥 Download Case Analysis",
+                        data=analysis,
+                        file_name="case_analysis_report.txt",
+                        mime="text/plain",
+                        use_container_width=True,
+                    )
+            else:
+                st.download_button(
+                    "📥 Download Case Analysis",
+                    data=analysis,
+                    file_name="case_analysis_report.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
         elif analysis:
             st.warning(analysis)
 
@@ -759,6 +1153,143 @@ else:
                 st.markdown(f"**Case {len(history) - 1 - i}:** {entry['description'][:100]}…")
                 n = entry['result'].get('case_sections_found', 0)
                 st.caption(f"Found {n} applicable sections")
+
+
+# =====================================================================
+# MODE: CONTRACT COMPARISON
+# =====================================================================
+
+else:
+
+    st.markdown("### 📂 Upload Two Contract Versions")
+    col_orig, col_rev = st.columns(2)
+
+    with col_orig:
+        st.markdown("**📄 Original Contract**")
+        compare_text_a = st.text_area(
+            "Paste original contract:",
+            height=200,
+            placeholder="Paste the original contract text here...",
+            key="compare_a",
+        )
+
+    with col_rev:
+        st.markdown("**📄 Revised Contract**")
+        compare_text_b = st.text_area(
+            "Paste revised contract:",
+            height=200,
+            placeholder="Paste the revised contract text here...",
+            key="compare_b",
+        )
+
+    compare_btn = st.button(
+        "⚖️ Compare Contracts",
+        type="primary",
+        use_container_width=True,
+        key="compare_btn",
+    )
+
+    if compare_btn:
+        if not compare_text_a.strip() or not compare_text_b.strip():
+            st.warning("⚠️ Please paste both contract versions.")
+        elif not check_rate_limit(st.session_state.analysis_count, MAX_ANALYSES_PER_SESSION, "analyses"):
+            pass
+        else:
+            with st.spinner("🔄 Comparing contracts (segment → classify → diff → analyze)..."):
+                try:
+                    from src.comparison import segment_and_align, calculate_risk_delta
+                    from src.classification import get_classifier
+                    from src.segmentation import segment_into_clauses
+
+                    # 1. Segment and align
+                    changes = segment_and_align(compare_text_a, compare_text_b)
+
+                    # 2. Classify both sets for risk delta
+                    classifier = get_classifier()
+                    clauses_a = segment_into_clauses(compare_text_a)
+                    clauses_b = segment_into_clauses(compare_text_b)
+
+                    risks_a = classifier.classify_batch([c["text"] for c in clauses_a]) if clauses_a else []
+                    risks_b = classifier.classify_batch([c["text"] for c in clauses_b]) if clauses_b else []
+
+                    risk_delta = calculate_risk_delta(risks_a, risks_b)
+
+                    # 3. LLM overall summary
+                    try:
+                        from src.chains.compare_chain import overall_comparison_summary
+                        summary = overall_comparison_summary(changes, risk_delta)
+                    except Exception:
+                        summary = ""
+
+                    st.session_state.compare_result = {
+                        "changes": changes,
+                        "risk_delta": risk_delta,
+                        "summary": summary,
+                    }
+                    st.session_state.analysis_count += 1
+
+                except Exception as e:
+                    st.error(f"Comparison failed: {e}")
+                    logger.error(f"Comparison error: {e}")
+
+    # Display comparison results
+    comp = st.session_state.compare_result
+    if comp:
+        st.markdown("---")
+        st.markdown("### 📊 Comparison Results")
+
+        changes = comp["changes"]
+        delta = comp["risk_delta"]
+
+        # Metrics
+        n_unchanged = sum(1 for c in changes if c["status"] == "unchanged")
+        n_modified = sum(1 for c in changes if c["status"] == "modified")
+        n_added = sum(1 for c in changes if c["status"] == "added")
+        n_removed = sum(1 for c in changes if c["status"] == "removed")
+
+        mc1, mc2, mc3, mc4 = st.columns(4)
+        mc1.metric("✅ Unchanged", n_unchanged)
+        mc2.metric("✏️ Modified", n_modified)
+        mc3.metric("➕ Added", n_added)
+        mc4.metric("➖ Removed", n_removed)
+
+        # Risk delta
+        st.markdown("### 📈 Risk Delta")
+        rc1, rc2, rc3 = st.columns(3)
+        rc1.metric("Original Risk", f"{delta['original_avg_score']:.0%}")
+        rc2.metric("Revised Risk", f"{delta['revised_avg_score']:.0%}")
+        direction_emoji = "🔺" if delta["direction"] == "increased" else "🔻" if delta["direction"] == "decreased" else "➡️"
+        rc3.metric("Direction", f"{direction_emoji} {delta['direction'].title()}")
+
+        if delta.get("new_high_risk", 0) > 0:
+            st.warning(f"⚠️ {delta['new_high_risk']} new high-risk clauses detected in revision!")
+
+        # Clause-level diff
+        st.markdown("### 📝 Clause Diff")
+        status_emoji = {"unchanged": "✅", "modified": "✏️", "added": "➕", "removed": "➖"}
+
+        for i, change in enumerate(changes):
+            emoji = status_emoji.get(change["status"], "❓")
+            sim = change.get("similarity", 0)
+            label = f"{emoji} Clause {i+1} — {change['status'].title()}"
+            if change["status"] == "modified":
+                label += f" ({int(sim * 100)}% similar)"
+
+            with st.expander(label, expanded=(change["status"] == "modified")):
+                if change["status"] in ("modified", "removed"):
+                    st.markdown("**Original:**")
+                    st.text(change["original"][:500])
+                if change["status"] in ("modified", "added"):
+                    st.markdown("**Revised:**")
+                    st.text(change["revised"][:500])
+                if change["status"] == "unchanged":
+                    st.text(change["original"][:300])
+
+        # LLM Summary
+        summary = comp.get("summary", "")
+        if summary:
+            st.markdown("### 🧠 AI Comparison Summary")
+            st.markdown(summary)
 
 
 # Footer

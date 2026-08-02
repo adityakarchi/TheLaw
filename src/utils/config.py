@@ -1,7 +1,6 @@
 """Centralised configuration — single source of truth for all settings.
 
-Loads environment variables from .env, defines model parameters, paths,
-and provides factory functions for shared resources (LLM, embeddings).
+Loads environment variables from .env (local) or Streamlit Secrets (cloud).
 """
 
 import os
@@ -15,56 +14,69 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+
+def _get_env(key: str, default: str = "") -> str:
+    """Read from os.environ first, then Streamlit secrets (cloud deployment fallback)."""
+    val = os.getenv(key, "")
+    if val:
+        return val
+    try:
+        import streamlit as st
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
+
 # ─────────────────────────────────────────────
 # Paths
 # ─────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-MODELS_DIR   = PROJECT_ROOT / "models"
-DATA_DIR     = PROJECT_ROOT / "data"
+PROJECT_ROOT    = Path(__file__).resolve().parent.parent.parent
+MODELS_DIR      = PROJECT_ROOT / "models"
+DATA_DIR        = PROJECT_ROOT / "data"
 FAISS_INDEX_DIR = DATA_DIR / "faiss_index"
 
 # ─────────────────────────────────────────────
 # LLM (Groq)
 # ─────────────────────────────────────────────
-GROQ_API_KEY:    str   = os.getenv("GROQ_API_KEY", "")
-LLM_MODEL:       str   = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
-LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.3"))
-LLM_MAX_TOKENS:  int   = int(os.getenv("LLM_MAX_TOKENS", "2048"))
+GROQ_API_KEY:    str   = _get_env("GROQ_API_KEY")
+LLM_MODEL:       str   = _get_env("LLM_MODEL", "llama-3.1-8b-instant")
+LLM_TEMPERATURE: float = float(_get_env("LLM_TEMPERATURE", "0.3"))
+LLM_MAX_TOKENS:  int   = int(_get_env("LLM_MAX_TOKENS", "2048"))
 
 # ─────────────────────────────────────────────
 # AWS / S3
 # ─────────────────────────────────────────────
-AWS_ACCESS_KEY_ID:     str = os.getenv("AWS_ACCESS_KEY_ID", "")
-AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")
-AWS_REGION:            str = os.getenv("AWS_REGION", "ap-south-1")
-S3_BUCKET_NAME:        str = os.getenv("S3_BUCKET_NAME", "")
+AWS_ACCESS_KEY_ID:     str = _get_env("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY: str = _get_env("AWS_SECRET_ACCESS_KEY")
+AWS_REGION:            str = _get_env("AWS_REGION", "ap-south-1")
+S3_BUCKET_NAME:        str = _get_env("S3_BUCKET_NAME")
 
 # ─────────────────────────────────────────────
 # Embeddings
 # ─────────────────────────────────────────────
-EMBEDDING_MODEL:  str = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-EMBEDDING_DEVICE: str = os.getenv("EMBEDDING_DEVICE", "cpu")
+EMBEDDING_MODEL:  str = _get_env("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+EMBEDDING_DEVICE: str = _get_env("EMBEDDING_DEVICE", "cpu")
 
 # ─────────────────────────────────────────────
 # RAG / Retrieval
 # ─────────────────────────────────────────────
-CHUNK_SIZE:      int = int(os.getenv("CHUNK_SIZE", "1000"))
-CHUNK_OVERLAP:   int = int(os.getenv("CHUNK_OVERLAP", "200"))
-RETRIEVER_TOP_K: int = int(os.getenv("RETRIEVER_TOP_K", "4"))
+CHUNK_SIZE:      int = int(_get_env("CHUNK_SIZE", "1000"))
+CHUNK_OVERLAP:   int = int(_get_env("CHUNK_OVERLAP", "200"))
+RETRIEVER_TOP_K: int = int(_get_env("RETRIEVER_TOP_K", "4"))
 
 # ─────────────────────────────────────────────
 # Legal Detection
 # ─────────────────────────────────────────────
-MIN_LEGAL_SCORE:              float = float(os.getenv("MIN_LEGAL_SCORE", "5.0"))
-CONFIDENCE_THRESHOLD_LEGAL:   float = float(os.getenv("CONFIDENCE_THRESHOLD_LEGAL", "0.50"))
+MIN_LEGAL_SCORE:            float = float(_get_env("MIN_LEGAL_SCORE", "5.0"))
+CONFIDENCE_THRESHOLD_LEGAL: float = float(_get_env("CONFIDENCE_THRESHOLD_LEGAL", "0.50"))
 
 
 def _validate_api_key() -> str:
     """Validate and return the Groq API key."""
-    key = GROQ_API_KEY
+    key = _get_env("GROQ_API_KEY")
     if not key:
         raise EnvironmentError(
-            "GROQ_API_KEY not found. Set it in .env or as an environment variable.\n"
+            "GROQ_API_KEY not found. Set it in .env (local) or Streamlit Secrets (cloud).\n"
             "Get your free key at: https://console.groq.com/"
         )
     return key
@@ -101,7 +113,11 @@ def check_api_connection() -> tuple[bool, str]:
 def get_aws_status() -> dict:
     """Return a dict with AWS/S3 configuration status."""
     return {
-        "configured": all([AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME]),
-        "bucket":     S3_BUCKET_NAME,
-        "region":     AWS_REGION,
+        "configured": all([
+            _get_env("AWS_ACCESS_KEY_ID"),
+            _get_env("AWS_SECRET_ACCESS_KEY"),
+            _get_env("S3_BUCKET_NAME"),
+        ]),
+        "bucket": _get_env("S3_BUCKET_NAME"),
+        "region": _get_env("AWS_REGION", "ap-south-1"),
     }

@@ -57,3 +57,6 @@ class GraphState(TypedDict, total=False):
     # Meta
     error: Optional[str]
     processing_time_ms: int
+
+    # Output Language (Feature 7)
+    output_language: str              # e.g. "English", "Hindi", "Tamil", etc.

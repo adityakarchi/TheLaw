@@ -67,10 +67,63 @@ class DocumentLoader:
             raise ValueError("Input text is empty")
         return self._clean_text(text)
 
+    def load_docx(self, file_path_or_buffer) -> str:
+        """Extract text from a Word (.docx) document.
+
+        Extracts paragraphs, tables (cells flattened with tab separators),
+        and skips images gracefully with a [IMAGE] placeholder.
+        """
+        from docx import Document as DocxDocument
+
+        if hasattr(file_path_or_buffer, "read"):
+            doc = DocxDocument(file_path_or_buffer)
+        else:
+            doc = DocxDocument(str(file_path_or_buffer))
+
+        parts: list[str] = []
+
+        for element in doc.element.body:
+            tag = element.tag.split("}")[-1] if "}" in element.tag else element.tag
+
+            if tag == "p":
+                # Paragraph — check for inline images
+                para_text = element.text or ""
+                has_image = any(
+                    "blip" in sub.tag or "pic" in sub.tag
+                    for sub in element.iter()
+                )
+                if has_image and not para_text.strip():
+                    parts.append("[IMAGE]")
+                elif para_text.strip():
+                    parts.append(para_text.strip())
+
+            elif tag == "tbl":
+                # Table — flatten each row with tab separators
+                from docx.table import Table as DocxTable
+                try:
+                    table = DocxTable(element, doc)
+                    for row in table.rows:
+                        row_text = "\t".join(
+                            (cell.text or "").strip() for cell in row.cells
+                        )
+                        if row_text.strip():
+                            parts.append(row_text)
+                    parts.append("")  # blank line after table
+                except Exception:
+                    parts.append("[TABLE]")
+
+        if not parts:
+            raise ValueError("No text could be extracted from DOCX")
+
+        raw = "\n".join(parts)
+        return self._clean_text(raw)
+
     def load(self, input_data, input_type: str = "text") -> str:
-        """Unified loader: accepts PDF path/buffer or raw text string."""
+        """Unified loader: accepts PDF path/buffer, DOCX path/buffer, or raw text string."""
         if input_type == "pdf":
             raw = self.load_pdf(input_data)
+        elif input_type == "docx":
+            raw = self.load_docx(input_data)
         else:
             raw = self.load_text(str(input_data))
         return self._clean_text(raw)

@@ -1,7 +1,9 @@
-"""Simplification Chain — converts legal text to plain English using RAG context.
+"""Simplification Chain — converts legal text to plain language using RAG context.
 
 Uses LangChain + Groq to produce a structured simplified version that
 preserves all legal obligations, rights, deadlines, and conditions.
+
+Supports multi-language output (Feature 7).
 """
 
 import logging
@@ -18,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Prompt templates
 
 SYSTEM_PROMPT = """You are a senior legal translator with 20 years of experience converting
-complex legal documents into clear, plain English that any non-lawyer can understand.
+complex legal documents into clear, plain language that any non-lawyer can understand.
 
 CRITICAL RULES:
 1. Preserve ALL substantive legal meaning — obligations, rights, conditions, deadlines.
@@ -29,11 +31,14 @@ CRITICAL RULES:
 6. Highlight any red-flag clauses (unlimited liability, unilateral termination, etc.).
 7. Be concise but complete — do NOT omit information.
 8. End with a brief "Key Takeaways" section (3-5 bullet points).
-9. If the text references other sections, note the reference without fabricating content."""
+9. If the text references other sections, note the reference without fabricating content.
+10. Respond ENTIRELY in {language}. Use natural, everyday {language} that a non-lawyer can understand."""
 
 SIMPLIFY_PROMPT = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
-    ("human", """Simplify the following legal text into plain English.
+    ("human", """Simplify the following legal text into plain language.
+
+OUTPUT LANGUAGE: {language}
 
 RELEVANT CONTEXT FROM THE SAME DOCUMENT (use to improve accuracy):
 ---
@@ -50,7 +55,9 @@ SIMPLIFIED VERSION:"""),
 
 SIMPLIFY_NO_CONTEXT_PROMPT = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
-    ("human", """Simplify the following legal text into plain English.
+    ("human", """Simplify the following legal text into plain language.
+
+OUTPUT LANGUAGE: {language}
 
 LEGAL TEXT TO SIMPLIFY:
 \"\"\"
@@ -81,16 +88,18 @@ def simplify_with_context(
     text: str,
     context: str = "",
     llm: Optional[ChatGroq] = None,
+    language: str = "English",
 ) -> str:
     """Simplify legal text, optionally enriched with retrieved context.
 
     Args:
-        text:    The legal text to simplify.
-        context: RAG-retrieved context from the same document.
-        llm:     Optional pre-configured LLM instance.
+        text:     The legal text to simplify.
+        context:  RAG-retrieved context from the same document.
+        llm:      Optional pre-configured LLM instance.
+        language: Output language (default: "English").
 
     Returns:
-        Simplified plain-English version of the text.
+        Simplified plain-language version of the text.
     """
     if not text or len(text.strip()) < 20:
         return "Text too short to simplify."
@@ -98,10 +107,10 @@ def simplify_with_context(
     try:
         if context.strip():
             chain = get_simplify_chain(llm)
-            result = chain.invoke({"text": text, "context": context})
+            result = chain.invoke({"text": text, "context": context, "language": language})
         else:
             chain = get_simplify_chain_no_context(llm)
-            result = chain.invoke({"text": text})
+            result = chain.invoke({"text": text, "language": language})
 
         return result.strip()
 

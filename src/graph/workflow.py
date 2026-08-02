@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 _retriever: Optional[LegalRetriever] = None
 _law_index = None
+_pol_index = None   # Pile of Law FAISS index (Feature 2)
+_classifier = None  # Clause classifier singleton (Feature 1)
 
 
 def _get_retriever() -> LegalRetriever:
@@ -49,6 +51,58 @@ def _get_law_index():
         _law_index = LawIndexBuilder()
         _law_index.build_index()
     return _law_index
+
+
+def _get_pol_index():
+    """Lazy-load Pile of Law FAISS index (Feature 2)."""
+    global _pol_index
+    if _pol_index is None:
+        try:
+            from src.rag.pile_of_law import load_pol_documents
+            from src.rag.embedder import EmbeddingPipeline
+            from src.rag.vectordb import VectorStore
+            import faiss
+            from pathlib import Path
+
+            index_dir = Path(__file__).resolve().parent.parent.parent / "data" / "pile_of_law_index"
+
+            if index_dir.exists() and (index_dir / "index.faiss").exists():
+                logger.info("Loading cached Pile of Law index")
+                embedder = EmbeddingPipeline()
+                vs = VectorStore(embedder)
+                vs.load(str(index_dir))
+                _pol_index = vs
+            else:
+                logger.info("Building Pile of Law index (first run)...")
+                docs = load_pol_documents(max_per_source=50)
+                if docs:
+                    embedder = EmbeddingPipeline()
+                    vs = VectorStore(embedder)
+                    vs.add_documents(docs)
+                    index_dir.mkdir(parents=True, exist_ok=True)
+                    vs.save(str(index_dir))
+                    _pol_index = vs
+                    logger.info(f"Built Pile of Law index with {len(docs)} docs")
+                else:
+                    logger.warning("No Pile of Law data found")
+                    return None
+        except Exception as e:
+            logger.warning(f"Pile of Law index unavailable: {e}")
+            return None
+    return _pol_index
+
+
+def _get_classifier():
+    """Lazy-load clause classifier singleton (Feature 1)."""
+    global _classifier
+    if _classifier is None:
+        try:
+            from src.classification import get_classifier
+            _classifier = get_classifier()
+        except Exception as e:
+            logger.warning(f"Clause classifier unavailable: {e}")
+            return None
+    return _classifier
 
 
 def reset_retriever() -> None:
@@ -158,6 +212,7 @@ def simplify_node(state: GraphState) -> dict:
     try:
         retriever = _get_retriever()
         llm = get_llm()
+        language = state.get("output_language", "English")
 
         # Get broad context for summarisation
         context = retriever.get_summary_context(max_chunks=6)
@@ -167,7 +222,7 @@ def simplify_node(state: GraphState) -> dict:
         # Limit to ~12k chars to stay within Groq context window
         text_for_llm = raw_text[:12000]
 
-        simplified = simplify_with_context(text_for_llm, context, llm)
+        simplified = simplify_with_context(text_for_llm, context, llm, language=language)
         elapsed = int((time.time() - start) * 1000)
 
         return {
@@ -181,7 +236,10 @@ def simplify_node(state: GraphState) -> dict:
 
 
 def risk_node(state: GraphState) -> dict:
-    """Analyze the document for risky clauses."""
+    """Analyze the document for risky clauses.
+
+    Feature 1: Pre-classifies clauses with BERT before sending to LLM.
+    """
     logger.info("▶ risk_node")
     start = time.time()
 
@@ -205,10 +263,28 @@ def risk_node(state: GraphState) -> dict:
 
         combined_context = "\n\n---\n\n".join(contexts) if contexts else ""
 
+        # Feature 1: Pre-classify clauses with BERT
+        classifier = _get_classifier()
         raw_text = state.get("raw_text", "")
+        classifier_context = ""
+        if classifier:
+            try:
+                from src.segmentation import segment_into_clauses
+                clauses = segment_into_clauses(raw_text)
+                clause_texts = [c["text"] for c in clauses]
+                if clause_texts:
+                    classifier_context = classifier.format_for_risk_prompt(clause_texts)
+                    combined_context = (
+                        f"PRE-CLASSIFIED CLAUSE ANALYSIS:\n{classifier_context}"
+                        f"\n\n---\n\n{combined_context}"
+                    )
+            except Exception as e:
+                logger.warning(f"Clause pre-classification failed: {e}")
+
+        language = state.get("output_language", "English")
         text_for_llm = raw_text[:12000]
 
-        risk_result = analyze_risks(text_for_llm, combined_context, llm)
+        risk_result = analyze_risks(text_for_llm, combined_context, llm, language=language)
         elapsed = int((time.time() - start) * 1000)
 
         return {
@@ -262,7 +338,10 @@ def case_input_node(state: GraphState) -> dict:
 
 
 def law_search_node(state: GraphState) -> dict:
-    """Search Indian law corpus using FAISS (NO LLM). Pure vector search."""
+    """Search Indian law corpus + Pile of Law using FAISS (NO LLM).
+
+    Feature 2: Searches both law_index and pile_of_law_index.
+    """
     logger.info("▶ law_search_node")
     start = time.time()
 
@@ -271,9 +350,61 @@ def law_search_node(state: GraphState) -> dict:
         return {"error": "No case description for law search."}
 
     try:
+        # Primary: Indian law statutes
         law_idx = _get_law_index()
         results = law_idx.search_laws(desc, k=8)
         context = law_idx.get_context_for_llm(desc, k=6)
+
+        # Label primary results as "Statute"
+        for r in results:
+            r.setdefault("source_type", "Statute")
+
+        # Feature 2: Secondary search — Pile of Law (case law, contracts, etc.)
+        pol_context = ""
+        try:
+            pol_idx = _get_pol_index()
+            if pol_idx is not None:
+                pol_docs = pol_idx.search(desc, k=4)
+                if pol_docs:
+                    pol_entries = []
+                    for doc in pol_docs:
+                        source_label = doc.metadata.get("label", "Case Law")
+                        category = doc.metadata.get("category", "case_law")
+
+                        # Map category to display type
+                        if category == "case_law":
+                            stype = "Case Law"
+                        elif category == "contract":
+                            stype = "Contract Precedent"
+                        elif category == "legal_advice":
+                            stype = "Legal Q&A"
+                        else:
+                            stype = "Legal Reference"
+
+                        pol_entries.append({
+                            "section": source_label,
+                            "title": doc.page_content[:80] + "...",
+                            "act_name": source_label,
+                            "crime": "",
+                            "punishment": "",
+                            "jail_term": "",
+                            "fine": "",
+                            "bailable": "",
+                            "cognizable": "",
+                            "confidence": doc.metadata.get("score", 0.5),
+                            "source_type": stype,
+                        })
+                        pol_context += f"\n[{stype}] {doc.page_content[:500]}\n"
+
+                    results.extend(pol_entries)
+                    logger.info(f"Added {len(pol_entries)} Pile of Law results")
+        except Exception as e:
+            logger.warning(f"Pile of Law search failed (non-fatal): {e}")
+
+        # Merge contexts
+        if pol_context:
+            context += "\n\n--- ADDITIONAL LEGAL REFERENCES ---\n" + pol_context
+
         elapsed = int((time.time() - start) * 1000)
 
         return {
@@ -424,6 +555,7 @@ def run_full_analysis(
     input_data,
     input_type: str = "text",
     user_question: Optional[str] = None,
+    output_language: str = "English",
 ) -> Dict[str, Any]:
     """Run the complete analysis pipeline and return the final state.
 
@@ -456,6 +588,7 @@ def run_full_analysis(
         "qa_answer": "",
         "error": None,
         "processing_time_ms": 0,
+        "output_language": output_language,
     }
 
     result = workflow.invoke(initial_state)
@@ -537,6 +670,7 @@ def run_case_research(case_description: str) -> Dict[str, Any]:
         "qa_answer": "",
         "error": None,
         "processing_time_ms": 0,
+        "output_language": "English",
         # Case research fields
         "pipeline_mode": "case_research",
         "case_description": case_description,

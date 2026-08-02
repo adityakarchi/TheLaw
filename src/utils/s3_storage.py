@@ -12,6 +12,19 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+
+def _get_env(key: str, default: str = "") -> str:
+    """Read from env vars first, then fall back to Streamlit secrets."""
+    val = os.getenv(key, "")
+    if val:
+        return val
+    # Streamlit Cloud secrets fallback
+    try:
+        import streamlit as st
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
 # Lazy import so the app still works without boto3 installed
 try:
     import boto3
@@ -29,18 +42,18 @@ def _get_s3_client():
 
     return boto3.client(
         "s3",
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-        region_name=os.getenv("AWS_REGION", "us-east-1"),
+        aws_access_key_id=_get_env("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=_get_env("AWS_SECRET_ACCESS_KEY"),
+        region_name=_get_env("AWS_REGION", "ap-south-1"),
     )
 
 
 def is_s3_configured() -> bool:
     """Return True if all required AWS env vars are set."""
     return all([
-        os.getenv("AWS_ACCESS_KEY_ID"),
-        os.getenv("AWS_SECRET_ACCESS_KEY"),
-        os.getenv("S3_BUCKET_NAME"),
+        _get_env("AWS_ACCESS_KEY_ID"),
+        _get_env("AWS_SECRET_ACCESS_KEY"),
+        _get_env("S3_BUCKET_NAME"),
         BOTO3_AVAILABLE,
     ])
 
@@ -64,7 +77,7 @@ def upload_pdf_to_s3(
         logger.warning("S3 not configured — skipping upload.")
         return None
 
-    bucket = os.getenv("S3_BUCKET_NAME")
+    bucket = _get_env("S3_BUCKET_NAME")
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     # Sanitize filename: replace spaces
     safe_name = filename.replace(" ", "_")
@@ -97,6 +110,57 @@ def upload_pdf_to_s3(
         return None
 
 
+def upload_docx_to_s3(
+    file_bytes: bytes,
+    filename: str,
+    prefix: str = "uploads",
+) -> Optional[str]:
+    """Upload a DOCX file to S3 and return the S3 object key.
+
+    Args:
+        file_bytes: Raw bytes of the .docx file.
+        filename:   Original filename (e.g. "contract.docx").
+        prefix:     S3 folder prefix (default: "uploads").
+
+    Returns:
+        S3 object key string if successful, None otherwise.
+    """
+    if not is_s3_configured():
+        logger.warning("S3 not configured — skipping upload.")
+        return None
+
+    bucket = _get_env("S3_BUCKET_NAME")
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    safe_name = filename.replace(" ", "_")
+    key = f"{prefix}/{timestamp}_{safe_name}"
+
+    try:
+        s3 = _get_s3_client()
+        s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=file_bytes,
+            ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ServerSideEncryption="AES256",
+            Metadata={
+                "original-filename": filename,
+                "uploaded-at": datetime.utcnow().isoformat(),
+            },
+        )
+        logger.info(f"Uploaded DOCX to s3://{bucket}/{key}")
+        return key
+
+    except NoCredentialsError:
+        logger.error("AWS credentials not found or invalid.")
+        return None
+    except ClientError as e:
+        logger.error(f"S3 upload failed: {e.response['Error']['Message']}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected S3 error: {e}")
+        return None
+
+
 def upload_text_to_s3(
     text: str,
     filename: str,
@@ -116,7 +180,7 @@ def upload_text_to_s3(
         logger.warning("S3 not configured — skipping upload.")
         return None
 
-    bucket = os.getenv("S3_BUCKET_NAME")
+    bucket = _get_env("S3_BUCKET_NAME")
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     safe_name = filename.replace(" ", "_")
     key = f"{prefix}/{timestamp}_{safe_name}"
@@ -157,7 +221,7 @@ def list_uploaded_documents(prefix: str = "uploads", max_items: int = 50) -> lis
     if not is_s3_configured():
         return []
 
-    bucket = os.getenv("S3_BUCKET_NAME")
+    bucket = _get_env("S3_BUCKET_NAME")
 
     try:
         s3 = _get_s3_client()
@@ -193,6 +257,6 @@ def list_uploaded_documents(prefix: str = "uploads", max_items: int = 50) -> lis
 
 def get_s3_console_url(key: str) -> str:
     """Return the AWS console URL for a given S3 object key."""
-    bucket = os.getenv("S3_BUCKET_NAME", "")
-    region = os.getenv("AWS_REGION", "us-east-1")
+    bucket = _get_env("S3_BUCKET_NAME", "")
+    region = _get_env("AWS_REGION", "ap-south-1")
     return f"https://s3.console.aws.amazon.com/s3/object/{bucket}?region={region}&prefix={key}"

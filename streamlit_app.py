@@ -60,6 +60,7 @@ LANGUAGE_OPTIONS = {
     "తెలుగు (Telugu)": "Telugu",
     "मराठी (Marathi)": "Marathi",
     "ગુજરાતી (Gujarati)": "Gujarati",
+    "ಕನ್ನಡ (Kannada)": "Kannada",
 }
 
 # Page config
